@@ -10,6 +10,7 @@ import type { FaceId, PaperState } from '../model/types';
 import { type Result, err, ok } from '../result';
 import { isValid } from '../validate/validate';
 import type { FoldOutcome, Mover } from './simpleFold';
+import { isHalved, mirrorLine, mirrorPoint, sameLine } from './symmetricFold';
 
 /**
  * 階段 4：反摺（內翻／外翻）。
@@ -108,27 +109,46 @@ function outcomeOf(p: Prep, style: ReverseStyle): FoldOutcome | null {
 const ordersSig = (s: PaperState): string =>
   [...s.orders.entries()].map(([k, v]) => `${k}=${v}`).sort().join(';');
 
-/** 列出這條線在 pick 那一側所有「合法」的反摺選項（去除幾何相同、層序也相同的重複）。 */
-export function reverseFoldOptions(state: PaperState, line: Line, pick: Vec2): ReverseOption[] {
-  const p = prep(state, line, pick);
-  if (!p.ok) return [];
-  const out: ReverseOption[] = [];
-  const seen = new Set<string>();
-  for (const style of REVERSE_STYLES) {
-    const outcome = outcomeOf(p.value, style);
-    if (!outcome) continue;
-    const sig = ordersSig(outcome.state);
-    if (seen.has(sig)) continue;
-    seen.add(sig);
-    out.push({ style, outcome });
-  }
-  return out;
-}
-
-/** 直接做某一種反摺（給歷史重播用）。 */
-export function reverseFold(state: PaperState, line: Line, pick: Vec2, style: ReverseStyle): Result<FoldOutcome> {
+/** 單邊反摺（不鏡像）。 */
+function reverseOne(state: PaperState, line: Line, pick: Vec2, style: ReverseStyle): Result<FoldOutcome> {
   const p = prep(state, line, pick);
   if (!p.ok) return p;
   const outcome = outcomeOf(p.value, style);
   return outcome ? ok(outcome) : err('reverse-pierces');
+}
+
+/**
+ * 鏡像感知的反摺：和一般摺法一致。
+ * - 已經對摺、或摺線本身左右對稱 → 只反摺一邊。
+ * - 其他情況 → 這邊反摺，另一邊也對稱地反摺，合起來算同一步；最後整體再驗證一次。
+ */
+function reverseSym(state: PaperState, line: Line, pick: Vec2, style: ReverseStyle): Result<FoldOutcome> {
+  const first = reverseOne(state, line, pick, style);
+  if (!first.ok) return first;
+  if (isHalved(state) || sameLine(line, mirrorLine(line))) return first;
+  const mid = { ...first.value.state, step: state.step };
+  const second = reverseOne(mid, mirrorLine(line), mirrorPoint(pick), style);
+  if (!second.ok) return second;
+  if (!isValid(second.value.state)) return err('reverse-pierces');
+  return ok({ state: second.value.state, movers: [...first.value.movers, ...second.value.movers] });
+}
+
+/** 列出這條線在 pick 那一側所有「合法」的反摺選項（鏡像感知；去除結果相同的重複）。 */
+export function reverseFoldOptions(state: PaperState, line: Line, pick: Vec2): ReverseOption[] {
+  const out: ReverseOption[] = [];
+  const seen = new Set<string>();
+  for (const style of REVERSE_STYLES) {
+    const r = reverseSym(state, line, pick, style);
+    if (!r.ok) continue;
+    const sig = ordersSig(r.value.state);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push({ style, outcome: r.value });
+  }
+  return out;
+}
+
+/** 直接做某一種反摺（給歷史重播用；同樣鏡像感知）。 */
+export function reverseFold(state: PaperState, line: Line, pick: Vec2, style: ReverseStyle): Result<FoldOutcome> {
+  return reverseSym(state, line, pick, style);
 }

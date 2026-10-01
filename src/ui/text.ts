@@ -20,7 +20,6 @@ export const TOOL_LABEL: Record<Tool, { icon: string; text: string }> = {
   line: { icon: '✏️', text: '畫線' },
   point: { icon: '📍', text: '點對點' },
   edge: { icon: '📐', text: '邊對邊' },
-  reverse: { icon: '🔀', text: '反摺' },
 };
 
 export const HINT: Record<Tool, Partial<Record<PhaseKind, string>>> = {
@@ -36,11 +35,6 @@ export const HINT: Record<Tool, Partial<Record<PhaseKind, string>>> = {
   edge: {
     idle: '點一條要移動的邊',
     edgeFrom: '再點一條邊（或中間的虛線），把它們對齊',
-  },
-  reverse: {
-    idle: '畫一條線，框住要反摺的尖端（按住 Shift 會變直的）',
-    drawing: '放開滑鼠，線就畫好了',
-    side: '點一下要反摺的那一半',
   },
 };
 

@@ -46,6 +46,7 @@ export function App() {
   const [resetKey, setResetKey] = useState(0);
   const [mode, setMode] = useState<Mode>('fold');
   const [design, setDesign] = useState<Design>(DEFAULT_DESIGN);
+  const [reverseMode, setReverseMode] = useState(false);
   const [reverseOpts, setReverseOpts] = useState<{ options: ReverseOption[]; line: Line; pick: Vec2 } | null>(null);
   const messageTimer = useRef<number | undefined>(undefined);
   const state = current(history);
@@ -53,8 +54,6 @@ export function App() {
   const halved = isHalved(state);
   // 還沒對摺就不能看飛機／風洞；若狀態退回到沒對摺，自動當作摺紙模式。
   const activeMode: Mode = (mode === 'plane' || mode === 'tunnel') && halved ? mode : 'fold';
-  // 反摺要先對摺（維持左右對稱）；沒對摺時當成畫線。
-  const activeTool: Tool = tool === 'reverse' && !halved ? 'line' : tool;
 
   const say = (text: string) => {
     setMessage(text);
@@ -163,7 +162,13 @@ export function App() {
   });
 
   const mass = paperMass(state).mass;
-  const hint = pending ? '這樣摺可以嗎？' : busy ? '摺摺摺…' : (HINT[activeTool][phase] ?? '');
+  const hint = pending
+    ? '這樣摺可以嗎？'
+    : busy
+      ? '摺摺摺…'
+      : reverseMode
+        ? '反摺模式：' + (HINT[tool][phase] ?? '定好要反摺的地方')
+        : (HINT[tool][phase] ?? '');
 
   return (
     <div class="app">
@@ -224,9 +229,8 @@ export function App() {
           {(Object.keys(TOOL_LABEL) as Tool[]).map((t) => (
             <button
               key={t}
-              class={`tool ${activeTool === t ? 'selected' : ''}`}
-              disabled={busy || reverseOpts !== null || (t === 'reverse' && !halved)}
-              title={t === 'reverse' && !halved ? '先按「對摺」才能反摺喔' : ''}
+              class={`tool ${tool === t ? 'selected' : ''}`}
+              disabled={busy || reverseOpts !== null}
               onClick={() => {
                 setPending(null);
                 setReverseOpts(null);
@@ -234,9 +238,21 @@ export function App() {
               }}
             >
               <span class="icon">{TOOL_LABEL[t].icon}</span>
-              <span>{TOOL_LABEL[t].text}{t === 'reverse' && !halved ? '（先對摺）' : ''}</span>
+              <span>{TOOL_LABEL[t].text}</span>
             </button>
           ))}
+          <button
+            class={`revmode ${reverseMode ? 'on' : ''}`}
+            disabled={busy || reverseOpts !== null}
+            title="開啟後，摺出來的那一摺會列出「塞進去／包起來…」等反摺選項讓你挑"
+            onClick={() => {
+              setPending(null);
+              setReverseOpts(null);
+              setReverseMode((v) => !v);
+            }}
+          >
+            🔀 反摺{reverseMode ? '：開' : ''}
+          </button>
           <div class="mirror-badge" title="摺一邊，另一邊會自動一起摺">
             ↔️ 左右一起摺
           </div>
@@ -245,10 +261,11 @@ export function App() {
         <div class="stage">
           <Editor
             state={state}
-            tool={activeTool}
+            tool={tool}
             pending={pending}
             animation={animation}
             resetKey={resetKey}
+            reverseMode={reverseMode}
             onReverse={onReverse}
             locked={reverseOpts !== null}
             onPropose={setPending}

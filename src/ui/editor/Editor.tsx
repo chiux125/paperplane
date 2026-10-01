@@ -30,7 +30,7 @@ import {
 import { type Folding, render } from './render';
 import { fitView, toWorld } from './view';
 
-export type Tool = 'line' | 'point' | 'edge' | 'reverse';
+export type Tool = 'line' | 'point' | 'edge';
 
 /** 一個算好、等孩子確認的摺法。 */
 export interface Proposal {
@@ -60,7 +60,9 @@ export interface EditorProps {
   readonly animation: { readonly proposal: Proposal; readonly theta: number } | null;
   /** 改變這個值會清除進行到一半的操作。 */
   readonly resetKey: number;
-  /** 反摺工具：畫線並點了要反摺的那一側後呼叫（由 App 算出合法選項）。 */
+  /** 反摺模式：開啟時，三種畫法摺出來的那一摺改成「列出反摺選項讓孩子挑」。 */
+  readonly reverseMode?: boolean;
+  /** 定好摺線與要反摺的那一側後呼叫（由 App 算出合法選項）。 */
   readonly onReverse?: (line: Line, pick: Vec2) => void;
   /** 鎖住畫布（例如正在挑反摺選項時）。 */
   readonly locked?: boolean;
@@ -114,12 +116,12 @@ export function Editor(props: EditorProps) {
   const hoverKey = snap ? `${snap.point.x},${snap.point.y}` : hoverEdge ? `${hoverEdge[0].x},${hoverEdge[0].y},${hoverEdge[1].x},${hoverEdge[1].y}` : '';
   const hoverSide = phase.kind === 'side' && hover ? (sideOf(phase, hover) > 0 ? 'left' : 'right') : null;
   const hoverProposal = useMemo((): Result<Proposal> | null => {
-    if (busy) return null;
-    if (phase.kind === 'side' && hoverSide && tool !== 'reverse') return phase[hoverSide];
+    if (busy || props.reverseMode) return null; // 反摺模式不預覽一般摺，等孩子從選項挑
+    if (phase.kind === 'side' && hoverSide) return phase[hoverSide];
     if (phase.kind === 'pointA' && snap && dist(snap.point, phase.a) > 1e-6) return propose(state, pointToPoint(phase.a, snap.point));
     if (phase.kind === 'edgeFrom' && hoverEdge) return propose(state, edgeToEdge(phase.from, phase.grab, hoverEdge));
     return null;
-  }, [phase, hoverKey, hoverSide, busy, state]);
+  }, [phase, hoverKey, hoverSide, busy, state, props.reverseMode]);
 
   useEffect(() => {
     if (!canvas.current || size.w === 0) return;
@@ -157,12 +159,22 @@ export function Editor(props: EditorProps) {
     else props.onError(r.error);
   };
 
+  // 反摺模式：定好摺線＋要反摺的那一側，交給 App 列選項；否則照常提出摺法。
+  const finish = (spec: Result<FoldSpec>) => {
+    if (props.reverseMode) {
+      if (spec.ok) props.onReverse?.(spec.value.line, spec.value.pick);
+      else props.onError(spec.error);
+    } else {
+      submit(propose(state, spec));
+    }
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     if (busy || e.button !== 0) return;
     const w = world(e);
-    if (tool === 'line' || tool === 'reverse') {
+    if (tool === 'line') {
       if (phase.kind === 'side') {
-        if (tool === 'reverse') {
+        if (props.reverseMode) {
           const l = lineThrough(phase.a, phase.b);
           if (l) props.onReverse?.(l, w);
         } else {
@@ -175,12 +187,12 @@ export function Editor(props: EditorProps) {
       }
     } else if (tool === 'point') {
       const p = snapped(w);
-      if (phase.kind === 'pointA') submit(propose(state, pointToPoint(phase.a, p)));
+      if (phase.kind === 'pointA') finish(pointToPoint(phase.a, p));
       else setPhase({ kind: 'pointA', a: p });
     } else {
       const seg = nearestSegment(sources.segments, w, EDGE_PX / view.k);
       if (!seg) return;
-      if (phase.kind === 'edgeFrom') submit(propose(state, edgeToEdge(phase.from, phase.grab, seg)));
+      if (phase.kind === 'edgeFrom') finish(edgeToEdge(phase.from, phase.grab, seg));
       else setPhase({ kind: 'edgeFrom', from: seg, grab: closestOnSeg(w, seg[0], seg[1]) });
     }
   };

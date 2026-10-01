@@ -10,6 +10,7 @@ import {
   faceList,
   foldedPolygon,
   near,
+  paperMass,
   push,
   replay,
   reverseFold,
@@ -63,6 +64,16 @@ describe('反摺：列出合法選項', () => {
 
   it('點在線上 → 沒有選項', () => {
     expect(reverseFoldOptions(halved(), G1.line, pt(0, 150))).toEqual([]);
+  });
+
+  it('對摺前：反摺會左右一起（鏡像、結果仍對稱）', () => {
+    const corner = { line: line(-105, 250, -55, 297), pick: pt(-90, 292) };
+    const opts = reverseFoldOptions(createSheet(), corner.line, corner.pick);
+    expect(opts.length).toBeGreaterThanOrEqual(1);
+    const st = opts[0].outcome.state;
+    expect(st.faces.size).toBeGreaterThan(1);
+    expectValid(st);
+    expect(paperMass(st).cg.x).toBeCloseTo(0, 6); // 左右對稱 → 重心在中線
   });
 });
 

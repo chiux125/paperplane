@@ -362,6 +362,24 @@ h1 {
   background: #e5f1fc;
 }
 
+.revmode {
+  width: 110px;
+  padding: 10px 6px;
+  font-size: 16px;
+  border-radius: 14px;
+  background: white;
+  border: 3px solid transparent;
+  box-shadow: 0 3px 0 #c9d6e1;
+  color: #5b5040;
+}
+
+.revmode.on {
+  background: #ffe8cf;
+  border-color: #d98a2b;
+  color: #a35a00;
+  font-weight: bold;
+}
+
 .mirror-badge {
   margin-top: auto;
   padding: 8px;
