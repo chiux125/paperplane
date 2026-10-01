@@ -91,3 +91,20 @@ describe('從飛機取翼弦', () => {
     expect(wingChord(asm)).toBeCloseTo(H, 3);
   });
 });
+
+describe('機翼內建攻角（摺線斜度）', () => {
+  const halved = () => unwrap(simpleFold(createSheet(), CENTER_LINE, vec(-1, H / 2)));
+  const tiltedLine = (tiltDeg: number): Line => ({
+    p: vec(35, 0),
+    d: vec(Math.sin(deg(tiltDeg)), Math.cos(deg(tiltDeg))),
+  });
+
+  it('摺線平行中線（斜度 0）→ 內建攻角 0', () => {
+    expect(buildAssembly(halved(), tiltedLine(0), 0).wingIncidence).toBeCloseTo(0, 9);
+  });
+
+  it('上反角 0 時：內建攻角 = 摺線斜度', () => {
+    expect(buildAssembly(halved(), tiltedLine(10), 0).wingIncidence).toBeCloseTo(deg(10), 6);
+    expect(buildAssembly(halved(), tiltedLine(-8), 0).wingIncidence).toBeCloseTo(deg(-8), 6);
+  });
+});

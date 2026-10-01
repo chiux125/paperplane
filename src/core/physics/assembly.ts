@@ -43,6 +43,11 @@ export interface Assembly {
   readonly wingLine: Line;
   /** 上反角（弧度）。 */
   readonly dihedral: number;
+  /**
+   * 機翼的「內建攻角」（弧度）：機翼翼弦在側視（前後向鉛直面）裡相對水平的傾角。
+   * 摺線和中線平行時為 0；摺線傾斜時機翼會有內建攻角（風洞側視就看得到差別）。
+   */
+  readonly wingIncidence: number;
 }
 
 export type PaperclipSize = 'small' | 'large';
@@ -89,6 +94,10 @@ export function buildAssembly(state: PaperState, wingLine: Line, dihedral: numbe
   const theta = Math.PI / 2 - dihedral;
   const swing = (p: Vec3): Vec3 => add3(axisPt, rotateAxis(sub3(p, axisPt), axis, theta));
 
+  // 機翼內建攻角：原紙上朝機頭的方向 (0,1) 嵌成 (0,1,0)，跟著機翼轉之後在側視 (y,z) 的傾角。
+  const chordDir = rotateAxis(vec3(0, 1, 0), axis, theta);
+  const wingIncidence = Math.atan2(chordDir.z, chordDir.y);
+
   const pieces: AssemblyPiece[] = [];
   const emit = (faceId: FaceId, region: Region, frontUp: boolean, sub: readonly Vec2[]) => {
     const a = area(sub);
@@ -119,7 +128,7 @@ export function buildAssembly(state: PaperState, wingLine: Line, dihedral: numbe
     if (wingPoly) emit(f.id, 'wing', frontUp, wingPoly);
   }
 
-  return { pieces, wingLine: line, dihedral };
+  return { pieces, wingLine: line, dihedral, wingIncidence };
 }
 
 export interface MassProps3D {

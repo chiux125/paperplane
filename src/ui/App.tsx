@@ -18,6 +18,7 @@ import {
   vec,
 } from '../core';
 import { Editor, type PhaseKind, type Proposal, type Tool } from './editor/Editor';
+import { type Design, DEFAULT_DESIGN } from './design';
 import { PlaneLab } from './plane/PlaneLab';
 import { WindTunnel } from './windtunnel/WindTunnel';
 import { ERROR_TEXT, HINT, TOOL_LABEL } from './text';
@@ -37,6 +38,7 @@ export function App() {
   const [confirmNew, setConfirmNew] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [mode, setMode] = useState<Mode>('fold');
+  const [design, setDesign] = useState<Design>(DEFAULT_DESIGN);
   const messageTimer = useRef<number | undefined>(undefined);
   const state = current(history);
   const busy = animation !== null;
@@ -160,9 +162,9 @@ export function App() {
       </nav>
 
       {activeMode === 'plane' ? (
-        <PlaneLab state={state} />
+        <PlaneLab state={state} design={design} onChange={setDesign} />
       ) : activeMode === 'tunnel' ? (
-        <WindTunnel state={state} />
+        <WindTunnel state={state} design={design} />
       ) : (
       <div class="workspace">
         <nav class="tools">
@@ -206,6 +208,7 @@ export function App() {
                     setConfirmNew(false);
                     setPending(null);
                     setHistory(createHistory(createSheet()));
+                    setDesign((d) => ({ ...d, clips: [] }));
                   }}
                 >
                   ✅ 好
