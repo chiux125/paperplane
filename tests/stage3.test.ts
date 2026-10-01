@@ -14,7 +14,11 @@ import {
   scale,
   separationAlong,
   simpleFold,
+  tipVortexAxisV,
+  topFlowAt,
+  topWing,
   vec,
+  vec3,
   wingChord,
 } from '../src/core';
 import { unwrap } from './helpers';
@@ -106,5 +110,61 @@ describe('機翼內建攻角（摺線斜度）', () => {
   it('上反角 0 時：內建攻角 = 摺線斜度', () => {
     expect(buildAssembly(halved(), tiltedLine(10), 0).wingIncidence).toBeCloseTo(deg(10), 6);
     expect(buildAssembly(halved(), tiltedLine(-8), 0).wingIncidence).toBeCloseTo(deg(-8), 6);
+  });
+});
+
+describe('翼尖渦流（上面看）', () => {
+  const halved = () => unwrap(simpleFold(createSheet(), CENTER_LINE, vec(-1, H / 2)));
+  const wingLine: Line = { p: vec(50, 0), d: vec(0, 1) };
+  const wing = topWing(buildAssembly(halved(), wingLine, deg(8)));
+  // 右翼尖渦流軸正上方的一個點（會被捲進去）
+  const pR = vec3(wing.tipU + 0.2, tipVortexAxisV(wing), 0.12);
+
+  it('攻角 0 → 沒有升力 → 側向與上下速度都約 0（煙線筆直）', () => {
+    const v = topFlowAt(wing, 0, pR);
+    expect(v.x).toBeCloseTo(1, 9);
+    expect(Math.abs(v.y)).toBeLessThan(1e-9);
+    expect(Math.abs(v.z)).toBeLessThan(1e-9);
+  });
+
+  it('攻角越大渦流越強（同一點旋轉速度變大）', () => {
+    const swirl = (a: number) => {
+      const v = topFlowAt(wing, deg(a), pR);
+      return Math.hypot(v.y, v.z);
+    };
+    expect(swirl(5)).toBeGreaterThan(0);
+    expect(swirl(12)).toBeGreaterThan(swirl(5));
+  });
+
+  it('失速後渦流變弱（環量塌陷）', () => {
+    const swirl = (a: number) => {
+      const v = topFlowAt(wing, deg(a), pR);
+      return Math.hypot(v.y, v.z);
+    };
+    expect(swirl(20)).toBeLessThan(swirl(12));
+  });
+
+  it('左右對稱：v 與 −v 的側向速度互為鏡像', () => {
+    const a = deg(10);
+    const p = vec3(wing.tipU + 0.3, 0.4, 0.05);
+    const mirror = vec3(p.x, -p.y, p.z);
+    const v = topFlowAt(wing, a, p);
+    const vm = topFlowAt(wing, a, mirror);
+    expect(vm.y).toBeCloseTo(-v.y, 9);
+    expect(vm.z).toBeCloseTo(v.z, 9);
+  });
+
+  it('機翼上游很遠、或離翼尖很遠 → 影響約 0', () => {
+    const up = topFlowAt(wing, deg(10), vec3(-1, tipVortexAxisV(wing), 0.1));
+    expect(Math.abs(up.y)).toBeLessThan(1e-6);
+    expect(Math.abs(up.z)).toBeLessThan(1e-6);
+    const far = topFlowAt(wing, deg(10), vec3(wing.tipU + 0.3, 8, 0.1));
+    expect(Math.hypot(far.y, far.z)).toBeLessThan(1e-3);
+  });
+
+  it('機翼形狀改變（上反角使俯視翼展變窄）→ 渦流軸位置跟著變', () => {
+    const flat = topWing(buildAssembly(halved(), wingLine, 0));
+    const up = topWing(buildAssembly(halved(), wingLine, deg(30)));
+    expect(tipVortexAxisV(up)).toBeLessThan(tipVortexAxisV(flat));
   });
 });

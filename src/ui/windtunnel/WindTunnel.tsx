@@ -6,22 +6,29 @@ import {
   STALL_ANGLE_DEG,
   assemblyMass,
   buildAssembly,
+  circulationMag,
   flowAt,
   inWake,
   isStalled,
   liftCenter,
   plate,
   stability,
+  tipVortexAxisV,
+  topFlowAt,
+  topWing,
   vec,
+  vec3,
   wingChord,
 } from '../../core';
 import { type Design, planeMetrics, wingLineOf } from '../design';
 
 const PLATE_FRAC = 0.3;
 const STEP = 0.03;
+const STEP_TOP = 0.014; // 俯視粒子每幀前進（正規化翼根弦）
 const SOURCES = 13;
 const PER_SOURCE = 18;
 const deg2rad = (d: number) => (d * Math.PI) / 180;
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 interface Particle {
   x: number;
@@ -110,6 +117,7 @@ export function WindTunnel(props: WindTunnelProps) {
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
   const stab = useMemo(() => stability(mass.cg, planform.cp, planform.meanChord), [mass, planform]);
   const geom = useMemo(() => buildGeom(assembly, mass.cg, planform.cp), [assembly, mass, planform]);
+  const tw = useMemo(() => topWing(assembly), [assembly]);
 
   const incidenceDeg = (geom.incidence * 180) / Math.PI;
   const effDeg = alphaDeg + incidenceDeg; // 風洞看到的實際攻角 = 滑桿 + 機翼內建攻角
@@ -117,8 +125,8 @@ export function WindTunnel(props: WindTunnelProps) {
   const nearStall = !stalled && effDeg >= STALL_ANGLE_DEG - 3;
 
   // 把會變動的資料放進 ref，讓單一動畫迴圈讀最新值。
-  const live = useRef({ effRad: 0, geom, stalled });
-  live.current = { effRad: deg2rad(effDeg), geom, stalled };
+  const live = useRef({ effRad: 0, geom, stalled, tw });
+  live.current = { effRad: deg2rad(effDeg), geom, stalled, tw };
 
   // 側視：煙線流過機翼剖面
   useEffect(() => {
@@ -208,26 +216,39 @@ export function WindTunnel(props: WindTunnelProps) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // 俯視：看機翼形狀，煙線直直流過；失速時機翼後面變亂流
+  // 俯視：翼尖渦流——煙線受機翼與攻角影響，翼尖後方捲成螺旋
   useEffect(() => {
     const el = topRef.current!;
-    let lines: { sy: number; x: number }[] = [];
+    interface TP { u: number; v: number; z: number; v0: number; trail: { u: number; v: number; z: number }[] }
+    let particles: TP[] = [];
     let w = 0;
     let h = 0;
     let fit = { k: 1, ox: 0, oy: 0 };
+    let uStart = -0.3;
+    let uEnd = 2.3;
+    const TRAIL = 12;
+
     const setFit = () => {
       const g = live.current.geom.top;
-      const k = Math.min((w * 0.84) / g.chord, (h * 0.84) / (2 * g.halfSpan));
-      fit = { k, ox: w * 0.1, oy: h / 2 };
-      lines = [];
-      const n = 15;
+      const rc = live.current.tw.rootChord || 1;
+      const uSpanMm = 2.4 * g.chord; // 顯示到機尾下游約 2.4 弦長，看得到翼尖螺旋
+      const k = Math.min((w * 0.92) / uSpanMm, (h * 0.9) / (2 * g.halfSpan * 1.7));
+      fit = { k, ox: w * 0.05, oy: h / 2 };
+      uStart = (0 - fit.ox) / (k * rc) - 0.2;
+      uEnd = (w - fit.ox) / (k * rc) + 0.2;
+      const vMax = (h * 0.5) / (k * rc);
+      particles = [];
+      const n = 17;
       for (let i = 0; i < n; i++) {
-        const sy = (i / (n - 1) - 0.5) * h * 0.92 + h / 2;
-        for (let j = 0; j < 14; j++) lines.push({ sy, x: ((w * 1.1) * j) / 14 - w * 0.05 });
+        const v0 = (i / (n - 1) - 0.5) * 2 * vMax;
+        for (let j = 0; j < 10; j++) {
+          const u = uStart + ((uEnd - uStart) * j) / 10;
+          particles.push({ u, v: v0, z: 0, v0, trail: [{ u, v: v0, z: 0 }] });
+        }
       }
     };
-    const SX = (u: number) => fit.ox + fit.k * u;
-    const SY = (v: number) => fit.oy - fit.k * v;
+    const SX = (umm: number) => fit.ox + fit.k * umm;
+    const SY = (vmm: number) => fit.oy - fit.k * vmm;
 
     let raf = 0;
     const frame = () => {
@@ -244,7 +265,10 @@ export function WindTunnel(props: WindTunnelProps) {
         setFit();
       }
       const g = live.current.geom.top;
+      const wingT = live.current.tw;
+      const alpha = live.current.effRad;
       const st = live.current.stalled;
+      const rc = wingT.rootChord || 1;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = BG;
       ctx.fillRect(0, 0, w, h);
@@ -253,27 +277,61 @@ export function WindTunnel(props: WindTunnelProps) {
       for (const poly of g.wings) fillPoly(ctx, poly.map((p) => ({ x: SX(p.x), y: SY(p.y) })), st ? '#c2502f' : '#3f7ec0', '#2b4a6b');
       for (const poly of g.fuse) fillPoly(ctx, poly.map((p) => ({ x: SX(p.x), y: SY(p.y) })), 'rgba(230,230,230,0.5)', 'rgba(120,120,120,0.5)');
 
-      const wingLeft = SX(0); // 機翼前緣（機頭側）螢幕 x
-      const wingRight = SX(g.chord); // 機翼後緣（機尾側）螢幕 x
-      const t = performance.now() * 0.004;
-      const TAIL = 22; // 煙線尾巴長度（px）
+      const t = performance.now() * 0.001;
+      const teU = wingT.tipU;
+      const halfSpanN = wingT.halfSpan;
       ctx.lineWidth = 1.6;
       ctx.lineCap = 'round';
-      const wobble = (x: number, sy: number) =>
-        st && x > wingLeft - 4 ? Math.min(16, (x - wingLeft) * 0.14) * Math.sin(x * 0.07 + sy * 0.1 + t * 3) : 0;
-      for (const ln of lines) {
-        ln.x += 2.4;
-        if (ln.x > w + TAIL) ln.x = -TAIL;
-        const head = { x: ln.x, y: ln.sy + wobble(ln.x, ln.sy) };
-        const tailX = ln.x - TAIL;
-        const over = st && ln.x > wingRight - 6;
-        ctx.strokeStyle = over ? 'rgba(240,150,90,0.9)' : 'rgba(255,255,255,0.7)';
-        ctx.beginPath();
-        ctx.moveTo(tailX, ln.sy + wobble(tailX, ln.sy));
-        ctx.lineTo((tailX + ln.x) / 2, ln.sy + wobble((tailX + ln.x) / 2, ln.sy));
-        ctx.lineTo(head.x, head.y);
-        ctx.stroke();
+
+      for (const p of particles) {
+        const vel = topFlowAt(wingT, alpha, vec3(p.u, p.v, p.z));
+        let dv = vel.y;
+        let dz = vel.z;
+        // 失速：機翼正後方（翼展內）保留亂流
+        const inWakeTop = st && p.u > teU * 0.6 && p.u < teU + 1.3 && Math.abs(p.v) < halfSpanN;
+        if (inWakeTop) {
+          dv += 0.7 * Math.sin(5 * p.u + 3 * p.v + t * 6);
+          dz += 0.7 * Math.cos(4 * p.v - 3 * p.u + t * 5);
+        }
+        p.u += vel.x * STEP_TOP;
+        p.v += dv * STEP_TOP;
+        p.z += dz * STEP_TOP;
+        if (p.u > uEnd + 0.1) {
+          p.u = uStart;
+          p.v = p.v0;
+          p.z = 0;
+          p.trail = [{ u: p.u, v: p.v, z: 0 }];
+          continue;
+        }
+        p.trail.push({ u: p.u, v: p.v, z: p.z });
+        if (p.trail.length > TRAIL) p.trail.shift();
+
+        // 畫拖尾；z < 0（渦流下方）畫暗一點，表現立體
+        for (let i = 1; i < p.trail.length; i++) {
+          const a = p.trail[i - 1];
+          const b = p.trail[i];
+          const depth = clamp01(0.5 + 0.7 * b.z);
+          const alphaLine = (inWakeTop ? 0.85 : 0.7) * (0.35 + 0.65 * depth) * (i / p.trail.length);
+          ctx.strokeStyle = inWakeTop
+            ? `rgba(240,150,90,${alphaLine})`
+            : `rgba(255,255,255,${alphaLine})`;
+          ctx.beginPath();
+          ctx.moveTo(SX(a.u * rc), SY(a.v * rc));
+          ctx.lineTo(SX(b.u * rc), SY(b.v * rc));
+          ctx.stroke();
+        }
       }
+
+      // 翼尖渦流圖示（↻ / ↺），越強越明顯
+      const strength = clamp01(circulationMag(alpha) / (Math.PI * Math.sin((STALL_ANGLE_DEG * Math.PI) / 180)));
+      if (strength > 0.05) {
+        const axisV = tipVortexAxisV(wingT);
+        const iconU = teU + 0.55;
+        const rpx = 8 + 13 * strength;
+        drawVortexIcon(ctx, SX(iconU * rc), SY(axisV * rc), rpx, true, strength);
+        drawVortexIcon(ctx, SX(iconU * rc), SY(-axisV * rc), rpx, false, strength);
+      }
+
       windLabel(ctx);
       raf = requestAnimationFrame(frame);
     };
@@ -306,7 +364,7 @@ export function WindTunnel(props: WindTunnelProps) {
           <canvas ref={sideRef} class="tunnel-canvas" />
         </div>
         <div class="tunnel-wrap">
-          <div class="tunnel-label">上面看（→風，看機翼形狀）</div>
+          <div class="tunnel-label">上面看（→風）· 翼尖渦流 ↻↺</div>
           <canvas ref={topRef} class="tunnel-canvas" />
         </div>
       </div>
@@ -407,6 +465,32 @@ function fillPoly(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]
   ctx.lineJoin = 'round';
   ctx.strokeStyle = stroke;
   ctx.stroke();
+}
+
+/** 翼尖渦流圖示：一個捲起的箭頭（cw = 從上方看順時針）。 */
+function drawVortexIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, cw: boolean, strength: number) {
+  ctx.save();
+  ctx.strokeStyle = `rgba(130,205,255,${0.35 + 0.5 * strength})`;
+  ctx.lineWidth = 2 + 2 * strength;
+  ctx.lineCap = 'round';
+  const a0 = -Math.PI / 2;
+  const sweep = Math.PI * 1.6 * (cw ? 1 : -1);
+  const a1 = a0 + sweep;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a1, !cw);
+  ctx.stroke();
+  // 箭頭
+  const ex = cx + r * Math.cos(a1);
+  const ey = cy + r * Math.sin(a1);
+  const tang = a1 + (cw ? 1 : -1) * (Math.PI / 2);
+  const ah = 5 + 3 * strength;
+  ctx.beginPath();
+  ctx.moveTo(ex, ey);
+  ctx.lineTo(ex - ah * Math.cos(tang - 0.5), ey - ah * Math.sin(tang - 0.5));
+  ctx.moveTo(ex, ey);
+  ctx.lineTo(ex - ah * Math.cos(tang + 0.5), ey - ah * Math.sin(tang + 0.5));
+  ctx.stroke();
+  ctx.restore();
 }
 
 function windLabel(ctx: CanvasRenderingContext2D) {
