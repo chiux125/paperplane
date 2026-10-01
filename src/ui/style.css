@@ -421,6 +421,15 @@ h1 {
   background: #8a99a8;
 }
 
+.crease {
+  min-width: 120px;
+  min-height: 56px;
+  font-size: 20px;
+  border-radius: 16px;
+  color: white;
+  background: #d98a2b;
+}
+
 .footnote {
   font-size: 14px;
   color: #7a6f60;

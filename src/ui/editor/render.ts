@@ -13,6 +13,7 @@ import {
   det,
   faceList,
   foldedPolygon,
+  hingeAngle,
   perp,
   reflection,
   scale,
@@ -66,7 +67,10 @@ export function render(canvas: HTMLCanvasElement, scene: Scene): void {
   drawNose(ctx, v, scene.state);
 
   if (scene.folding) drawFolding(ctx, v, scene.folding);
-  else drawFaces(ctx, v, scene.state);
+  else {
+    drawFaces(ctx, v, scene.state);
+    drawCreases(ctx, v, scene.state);
+  }
 
   for (const e of scene.edges) {
     ctx.strokeStyle = e.color;
@@ -128,6 +132,21 @@ function drawFaces(ctx: CanvasRenderingContext2D, v: View, s: PaperState) {
     const f = s.faces.get(id)!;
     fillFace(ctx, v, foldedPolygon(f), det(f.xf) > 0);
   }
+}
+
+/** 攤平的摺痕（鉸鏈角度 0）用藍色畫，和深色的紙邊區分，方便孩子看到參考線。 */
+function drawCreases(ctx: CanvasRenderingContext2D, v: View, s: PaperState) {
+  ctx.save();
+  ctx.strokeStyle = '#5b9bd5';
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = 'round';
+  for (const h of s.hinges) {
+    if (hingeAngle(s, h) !== 0) continue;
+    const f = s.faces.get(h.faces[0]);
+    if (!f) continue;
+    strokeSeg(ctx, v, [apply(f.xf, h.cpSeg[0]), apply(f.xf, h.cpSeg[1])]);
+  }
+  ctx.restore();
 }
 
 /** 面繞摺線轉 theta 後，從正上方看到的樣子（在紙面上的投影）。 */

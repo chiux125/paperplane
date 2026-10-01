@@ -1,6 +1,7 @@
 import type { Line } from './geom/line';
 import type { Vec2 } from './geom/vec';
 import type { PaperState } from './model/types';
+import { crease } from './planners/crease';
 import { flipOutcome } from './planners/flip';
 import { type FoldOutcome, simpleFoldOutcome } from './planners/simpleFold';
 import { symmetricFoldOutcome } from './planners/symmetricFold';
@@ -20,6 +21,7 @@ export type UserOp =
       /** 鏡像模式：另一邊自動對稱地摺。 */
       readonly mirror?: boolean;
     }
+  | { readonly kind: 'crease'; readonly line: Line }
   | { readonly kind: 'flip' };
 
 export function applyOpOutcome(state: PaperState, op: UserOp): Result<FoldOutcome> {
@@ -28,6 +30,10 @@ export function applyOpOutcome(state: PaperState, op: UserOp): Result<FoldOutcom
       return op.mirror
         ? symmetricFoldOutcome(state, op.line, op.pick, op.place)
         : simpleFoldOutcome(state, op.line, op.pick, op.place);
+    case 'crease': {
+      const r = crease(state, op.line);
+      return r.ok ? ok({ state: r.value, movers: [] }) : r;
+    }
     case 'flip':
       return ok(flipOutcome(state));
   }

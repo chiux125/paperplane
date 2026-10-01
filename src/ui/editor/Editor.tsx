@@ -178,7 +178,8 @@ export function Editor(props: EditorProps) {
   const onPointerMove = (e: PointerEvent) => {
     const w = world(e);
     setHover(w);
-    if (phase.kind === 'drawing') setPhase({ ...phase, b: snapped(w) });
+    // 按住 Shift：依孩子拉的方向，把線校正成完美水平或垂直
+    if (phase.kind === 'drawing') setPhase({ ...phase, b: e.shiftKey ? axisAlign(phase.a, w) : snapped(w) });
   };
 
   const onPointerUp = () => {
@@ -205,6 +206,11 @@ export function Editor(props: EditorProps) {
       onPointerLeave={() => setHover(null)}
     />
   );
+}
+
+/** 把 b 校正成相對 a 完美水平或垂直（看拉的方向比較偏哪一個）。 */
+function axisAlign(a: Vec2, w: Vec2): Vec2 {
+  return Math.abs(w.x - a.x) >= Math.abs(w.y - a.y) ? { x: w.x, y: a.y } : { x: a.x, y: w.y };
 }
 
 function sideOf(phase: { a: Vec2; b: Vec2 }, w: Vec2): number {

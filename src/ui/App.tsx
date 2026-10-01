@@ -3,6 +3,7 @@ import {
   type FoldError,
   type UserOp,
   CENTER_LINE,
+  applyOp,
   applyOpOutcome,
   canRedo,
   canUndo,
@@ -26,6 +27,7 @@ import { ERROR_TEXT, HINT, TOOL_LABEL } from './text';
 type Mode = 'fold' | 'plane' | 'tunnel';
 
 const FOLD_MS = 700;
+const CREASE_MS = 900;
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 export function App() {
@@ -77,6 +79,31 @@ export function App() {
   };
 
   const confirm = () => pending && play(pending);
+
+  /** 摺痕：沿同一條線摺一下再攤開，留下摺痕與交點（動畫會摺起來再回來）。 */
+  const makeCrease = (proposal: Proposal) => {
+    if (proposal.op.kind !== 'fold') return;
+    const op: UserOp = { kind: 'crease', line: proposal.op.line };
+    const r = applyOp(state, op);
+    if (!r.ok) return onError(r.error);
+    const creased = r.value;
+    setPending(null);
+    setMessage(null);
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / CREASE_MS);
+      if (t < 1) {
+        // 0 → π → 0：摺起來再攤平
+        const phase = t < 0.5 ? ease(t * 2) : ease((1 - t) * 2);
+        setAnimation({ proposal, theta: Math.PI * phase });
+        requestAnimationFrame(tick);
+      } else {
+        setHistory((h) => pushApplied(h, op, creased));
+        setAnimation(null);
+      }
+    };
+    requestAnimationFrame(tick);
+  };
 
   const halfFold = () => {
     if (isHalved(state)) return say('已經對摺好了喔');
@@ -226,6 +253,9 @@ export function App() {
                   <>
                     <button class="yes" onClick={confirm}>
                       ✅ 摺！
+                    </button>
+                    <button class="crease" title="摺一下再攤開，留下摺痕當記號" onClick={() => makeCrease(pending)}>
+                      📑 留摺痕
                     </button>
                     <button class="no" onClick={cancel}>
                       ✖ 不要

@@ -14,6 +14,7 @@ export * from './engine/angle';
 export * from './planners/simpleFold';
 export * from './planners/flip';
 export * from './planners/symmetricFold';
+export * from './planners/crease';
 export * from './construct/snap';
 export * from './construct/constructions';
 export * from './physics/mass';
