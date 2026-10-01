@@ -19,9 +19,10 @@ import {
 } from '../core';
 import { Editor, type PhaseKind, type Proposal, type Tool } from './editor/Editor';
 import { PlaneLab } from './plane/PlaneLab';
+import { WindTunnel } from './windtunnel/WindTunnel';
 import { ERROR_TEXT, HINT, TOOL_LABEL } from './text';
 
-type Mode = 'fold' | 'plane';
+type Mode = 'fold' | 'plane' | 'tunnel';
 
 const FOLD_MS = 700;
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
@@ -40,8 +41,8 @@ export function App() {
   const state = current(history);
   const busy = animation !== null;
   const halved = isHalved(state);
-  // 還沒對摺就不能看飛機；若狀態退回到沒對摺，自動當作摺紙模式。
-  const activeMode: Mode = mode === 'plane' && halved ? 'plane' : 'fold';
+  // 還沒對摺就不能看飛機／風洞；若狀態退回到沒對摺，自動當作摺紙模式。
+  const activeMode: Mode = (mode === 'plane' || mode === 'tunnel') && halved ? mode : 'fold';
 
   const say = (text: string) => {
     setMessage(text);
@@ -148,10 +149,20 @@ export function App() {
         >
           ✈️ 看飛機{halved ? '' : '（先對摺）'}
         </button>
+        <button
+          class={`mode ${activeMode === 'tunnel' ? 'selected' : ''}`}
+          disabled={busy || !halved}
+          title={halved ? '' : '先按「對摺」才能吹風洞喔'}
+          onClick={() => (halved ? setMode('tunnel') : say('先按「對摺」，再來吹風洞 💨'))}
+        >
+          💨 風洞{halved ? '' : '（先對摺）'}
+        </button>
       </nav>
 
       {activeMode === 'plane' ? (
         <PlaneLab state={state} />
+      ) : activeMode === 'tunnel' ? (
+        <WindTunnel state={state} />
       ) : (
       <div class="workspace">
         <nav class="tools">
@@ -228,7 +239,9 @@ export function App() {
       <footer class="footnote">
         {activeMode === 'plane'
           ? '🔴 重心、🔵 升力中心，都是算出來的示意，最後以實際射出為準'
-          : `第 ${state.step} 步 · 紙重約 ${mass.toFixed(1)} 公克 · 🔴 是算出來的重心，這是示意，最後以實際射出為準`}
+          : activeMode === 'tunnel'
+            ? '💨 煙線是簡化流場的示意，不是真的空氣，最後以實際射出為準'
+            : `第 ${state.step} 步 · 紙重約 ${mass.toFixed(1)} 公克 · 🔴 是算出來的重心，這是示意，最後以實際射出為準`}
       </footer>
     </div>
   );

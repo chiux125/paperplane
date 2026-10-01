@@ -20,6 +20,7 @@ export * from './physics/mass';
 export * from './physics/assembly';
 export * from './physics/planform';
 export * from './physics/stability';
+export * from './physics/windtunnel';
 export * from './validate/validate';
 export * from './history';
 export * from './result';
