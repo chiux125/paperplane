@@ -110,6 +110,7 @@ export function Preview3D(props: Preview3DProps) {
     }
 
     const box = new THREE.Box3();
+    const allPos: number[] = []; // 收集所有三角形，最後合併成一份來抽輪廓線
 
     for (const piece of props.assembly.pieces) {
       const verts = piece.poly.map(m);
@@ -121,6 +122,7 @@ export function Preview3D(props: Preview3DProps) {
         pos.push(verts[i].x, verts[i].y, verts[i].z);
         pos.push(verts[i + 1].x, verts[i + 1].y, verts[i + 1].z);
       }
+      allPos.push(...pos);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.computeVertexNormals();
@@ -129,9 +131,14 @@ export function Preview3D(props: Preview3DProps) {
         side: THREE.DoubleSide,
       });
       grp.add(new THREE.Mesh(geo, mat));
-      // 邊線
-      grp.add(new THREE.LineSegments(edges(verts), new THREE.LineBasicMaterial({ color: EDGE })));
     }
+
+    // 只畫「真正的轉折（紙彎折處）＋每一層的外緣」；同一平面內的摺痕用角度門檻（20°）隱藏。
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.Float32BufferAttribute(allPos, 3));
+    const outline = new THREE.EdgesGeometry(merged, 20);
+    grp.add(new THREE.LineSegments(outline, new THREE.LineBasicMaterial({ color: EDGE })));
+    merged.dispose();
 
     const size = box.getSize(new THREE.Vector3()).length() || 100;
     const markR = size * 0.025;
@@ -165,10 +172,3 @@ function sphere(p: THREE.Vector3, radius: number, color: number): THREE.Mesh {
   return mesh;
 }
 
-function edges(verts: THREE.Vector3[]): THREE.BufferGeometry {
-  const pts: THREE.Vector3[] = [];
-  for (let i = 0; i < verts.length; i++) {
-    pts.push(verts[i], verts[(i + 1) % verts.length]);
-  }
-  return new THREE.BufferGeometry().setFromPoints(pts);
-}
