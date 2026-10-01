@@ -18,7 +18,10 @@ import {
   vec,
 } from '../core';
 import { Editor, type PhaseKind, type Proposal, type Tool } from './editor/Editor';
+import { PlaneLab } from './plane/PlaneLab';
 import { ERROR_TEXT, HINT, TOOL_LABEL } from './text';
+
+type Mode = 'fold' | 'plane';
 
 const FOLD_MS = 700;
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
@@ -32,9 +35,13 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [confirmNew, setConfirmNew] = useState(false);
   const [resetKey, setResetKey] = useState(0);
+  const [mode, setMode] = useState<Mode>('fold');
   const messageTimer = useRef<number | undefined>(undefined);
   const state = current(history);
   const busy = animation !== null;
+  const halved = isHalved(state);
+  // 還沒對摺就不能看飛機；若狀態退回到沒對摺，自動當作摺紙模式。
+  const activeMode: Mode = mode === 'plane' && halved ? 'plane' : 'fold';
 
   const say = (text: string) => {
     setMessage(text);
@@ -125,6 +132,27 @@ export function App() {
         </div>
       </header>
 
+      <nav class="modes">
+        <button
+          class={`mode ${activeMode === 'fold' ? 'selected' : ''}`}
+          disabled={busy}
+          onClick={() => setMode('fold')}
+        >
+          📐 摺紙
+        </button>
+        <button
+          class={`mode ${activeMode === 'plane' ? 'selected' : ''}`}
+          disabled={busy || !halved}
+          title={halved ? '' : '先按「對摺」才能看飛機喔'}
+          onClick={() => (halved ? setMode('plane') : say('先按「對摺」，再來看飛機 ✈️'))}
+        >
+          ✈️ 看飛機{halved ? '' : '（先對摺）'}
+        </button>
+      </nav>
+
+      {activeMode === 'plane' ? (
+        <PlaneLab state={state} />
+      ) : (
       <div class="workspace">
         <nav class="tools">
           {(Object.keys(TOOL_LABEL) as Tool[]).map((t) => (
@@ -195,9 +223,12 @@ export function App() {
           </div>
         </div>
       </div>
+      )}
 
       <footer class="footnote">
-        第 {state.step} 步 · 紙重約 {mass.toFixed(1)} 公克 · 🔴 是算出來的重心，這是示意，最後以實際射出為準
+        {activeMode === 'plane'
+          ? '🔴 重心、🔵 升力中心，都是算出來的示意，最後以實際射出為準'
+          : `第 ${state.step} 步 · 紙重約 ${mass.toFixed(1)} 公克 · 🔴 是算出來的重心，這是示意，最後以實際射出為準`}
       </footer>
     </div>
   );

@@ -1,5 +1,12 @@
-import type { FoldError } from '../core';
+import type { FoldError, StabilityVerdict } from '../core';
 import type { PhaseKind, Tool } from './editor/Editor';
+
+/** 穩定度提示（給 8 歲孩子看的話）。 */
+export const STABILITY_TEXT: Record<StabilityVerdict, { emoji: string; text: string }> = {
+  'pitch-up': { emoji: '🙃', text: '重心太後面，可能會仰頭！' },
+  stable: { emoji: '👍', text: '穩穩的！' },
+  'nose-dive': { emoji: '😵', text: '機頭太重，可能會往下衝' },
+};
 
 export const TOOL_LABEL: Record<Tool, { icon: string; text: string }> = {
   line: { icon: '✏️', text: '畫線' },
