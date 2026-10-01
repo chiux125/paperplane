@@ -1,5 +1,13 @@
-import type { FoldError, StabilityVerdict } from '../core';
+import type { FoldError, ReverseStyle, StabilityVerdict } from '../core';
 import type { PhaseKind, Tool } from './editor/Editor';
+
+/** 反摺選項的孩子用說法（不講內翻／外翻術語）。 */
+export const REVERSE_LABEL: Record<ReverseStyle, { icon: string; text: string }> = {
+  over: { icon: '🔼', text: '蓋在上面' },
+  under: { icon: '🔽', text: '收到下面' },
+  inside: { icon: '📥', text: '塞進裡面' },
+  outside: { icon: '🤲', text: '包在外面' },
+};
 
 /** 穩定度提示（給 8 歲孩子看的話）。 */
 export const STABILITY_TEXT: Record<StabilityVerdict, { emoji: string; text: string }> = {
@@ -12,6 +20,7 @@ export const TOOL_LABEL: Record<Tool, { icon: string; text: string }> = {
   line: { icon: '✏️', text: '畫線' },
   point: { icon: '📍', text: '點對點' },
   edge: { icon: '📐', text: '邊對邊' },
+  reverse: { icon: '🔀', text: '反摺' },
 };
 
 export const HINT: Record<Tool, Partial<Record<PhaseKind, string>>> = {
@@ -28,6 +37,11 @@ export const HINT: Record<Tool, Partial<Record<PhaseKind, string>>> = {
     idle: '點一條要移動的邊',
     edgeFrom: '再點一條邊（或中間的虛線），把它們對齊',
   },
+  reverse: {
+    idle: '畫一條線，框住要反摺的尖端（按住 Shift 會變直的）',
+    drawing: '放開滑鼠，線就畫好了',
+    side: '點一下要反摺的那一半',
+  },
 };
 
 export const ERROR_TEXT: Record<FoldError, string> = {
@@ -37,4 +51,5 @@ export const ERROR_TEXT: Record<FoldError, string> = {
   'crosses-center': '這樣摺會跨過中線，左右兩邊會撞在一起喔',
   'same-point': '要點兩個不一樣的地方喔',
   'same-line': '這兩條邊已經對齊了喔',
+  'reverse-pierces': '這樣摺會穿過紙，換一個摺法試試',
 };

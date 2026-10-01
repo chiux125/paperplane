@@ -15,6 +15,7 @@ import {
   dist,
   edgeToEdge,
   freeLineFold,
+  lineThrough,
   midpoint,
   nearestSegment,
   ok,
@@ -29,7 +30,7 @@ import {
 import { type Folding, render } from './render';
 import { fitView, toWorld } from './view';
 
-export type Tool = 'line' | 'point' | 'edge';
+export type Tool = 'line' | 'point' | 'edge' | 'reverse';
 
 /** 一個算好、等孩子確認的摺法。 */
 export interface Proposal {
@@ -59,6 +60,10 @@ export interface EditorProps {
   readonly animation: { readonly proposal: Proposal; readonly theta: number } | null;
   /** 改變這個值會清除進行到一半的操作。 */
   readonly resetKey: number;
+  /** 反摺工具：畫線並點了要反摺的那一側後呼叫（由 App 算出合法選項）。 */
+  readonly onReverse?: (line: Line, pick: Vec2) => void;
+  /** 鎖住畫布（例如正在挑反摺選項時）。 */
+  readonly locked?: boolean;
   readonly onPropose: (p: Proposal) => void;
   readonly onError: (e: FoldError) => void;
   readonly onPhase: (p: PhaseKind) => void;
@@ -99,7 +104,7 @@ export function Editor(props: EditorProps) {
   const view = useMemo(() => fitView(state, size.w || 1, size.h || 1), [state, size]);
   const sources = useMemo(() => snapSources(state), [state]);
   const cg = useMemo(() => paperMass(state).cg, [state]);
-  const busy = pending !== null || animation !== null;
+  const busy = pending !== null || animation !== null || props.locked === true;
 
   const snap = hover && !busy && tool !== 'edge' && phase.kind !== 'side' ? snapPoint(sources, hover, SNAP_PX / view.k) : null;
   const hoverEdge = hover && !busy && tool === 'edge' ? nearestSegment(sources.segments, hover, EDGE_PX / view.k) : null;
@@ -110,7 +115,7 @@ export function Editor(props: EditorProps) {
   const hoverSide = phase.kind === 'side' && hover ? (sideOf(phase, hover) > 0 ? 'left' : 'right') : null;
   const hoverProposal = useMemo((): Result<Proposal> | null => {
     if (busy) return null;
-    if (phase.kind === 'side' && hoverSide) return phase[hoverSide];
+    if (phase.kind === 'side' && hoverSide && tool !== 'reverse') return phase[hoverSide];
     if (phase.kind === 'pointA' && snap && dist(snap.point, phase.a) > 1e-6) return propose(state, pointToPoint(phase.a, snap.point));
     if (phase.kind === 'edgeFrom' && hoverEdge) return propose(state, edgeToEdge(phase.from, phase.grab, hoverEdge));
     return null;
@@ -155,9 +160,14 @@ export function Editor(props: EditorProps) {
   const onPointerDown = (e: PointerEvent) => {
     if (busy || e.button !== 0) return;
     const w = world(e);
-    if (tool === 'line') {
+    if (tool === 'line' || tool === 'reverse') {
       if (phase.kind === 'side') {
-        submit(sideOf(phase, w) > 0 ? phase.left : phase.right);
+        if (tool === 'reverse') {
+          const l = lineThrough(phase.a, phase.b);
+          if (l) props.onReverse?.(l, w);
+        } else {
+          submit(sideOf(phase, w) > 0 ? phase.left : phase.right);
+        }
       } else {
         const a = snapped(w);
         canvas.current!.setPointerCapture(e.pointerId);

@@ -430,6 +430,45 @@ h1 {
   background: #d98a2b;
 }
 
+.reverse-picker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.picker-opts {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.picker-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  font-size: 16px;
+  border-radius: 14px;
+  background: white;
+  border: 3px solid transparent;
+  box-shadow: 0 2px 0 #c9d6e1;
+}
+
+.picker-opt:hover {
+  border-color: #4a90d9;
+  background: #eef6ff;
+}
+
+.picker-opt .thumb {
+  width: 84px;
+  height: 84px;
+  background: #dfe9f0;
+  border-radius: 10px;
+}
+
 .footnote {
   font-size: 14px;
   color: #7a6f60;

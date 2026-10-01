@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   type FoldError,
+  type Line,
+  type ReverseOption,
   type UserOp,
+  type Vec2,
   CENTER_LINE,
   applyOp,
   applyOpOutcome,
   canRedo,
+  reverseFoldOptions,
   canUndo,
   createHistory,
   createSheet,
@@ -19,6 +23,7 @@ import {
   vec,
 } from '../core';
 import { Editor, type PhaseKind, type Proposal, type Tool } from './editor/Editor';
+import { ReversePicker } from './editor/ReversePicker';
 import { type Design, DEFAULT_DESIGN } from './design';
 import { PlaneLab } from './plane/PlaneLab';
 import { WindTunnel } from './windtunnel/WindTunnel';
@@ -41,12 +46,15 @@ export function App() {
   const [resetKey, setResetKey] = useState(0);
   const [mode, setMode] = useState<Mode>('fold');
   const [design, setDesign] = useState<Design>(DEFAULT_DESIGN);
+  const [reverseOpts, setReverseOpts] = useState<{ options: ReverseOption[]; line: Line; pick: Vec2 } | null>(null);
   const messageTimer = useRef<number | undefined>(undefined);
   const state = current(history);
   const busy = animation !== null;
   const halved = isHalved(state);
   // 還沒對摺就不能看飛機／風洞；若狀態退回到沒對摺，自動當作摺紙模式。
   const activeMode: Mode = (mode === 'plane' || mode === 'tunnel') && halved ? mode : 'fold';
+  // 反摺要先對摺（維持左右對稱）；沒對摺時當成畫線。
+  const activeTool: Tool = tool === 'reverse' && !halved ? 'line' : tool;
 
   const say = (text: string) => {
     setMessage(text);
@@ -115,6 +123,24 @@ export function App() {
 
   const flipOver = () => play({ op: { kind: 'flip' }, outcome: flipOutcome(state) });
 
+  /** 反摺：畫線並點了一側後，算出合法選項讓孩子挑。 */
+  const onReverse = (line: Line, pick: Vec2) => {
+    const options = reverseFoldOptions(state, line, pick);
+    if (options.length === 0) return say('這裡沒辦法反摺，換個地方試試');
+    setPending(null);
+    setReverseOpts({ options, line, pick });
+  };
+  const pickReverse = (o: ReverseOption) => {
+    if (!reverseOpts) return;
+    const op: UserOp = { kind: 'reverse', line: reverseOpts.line, pick: reverseOpts.pick, style: o.style };
+    setReverseOpts(null);
+    play({ op, outcome: o.outcome });
+  };
+  const cancelReverse = () => {
+    setReverseOpts(null);
+    setResetKey((k) => k + 1);
+  };
+
   const doUndo = () => {
     setPending(null);
     setHistory(undo);
@@ -137,7 +163,7 @@ export function App() {
   });
 
   const mass = paperMass(state).mass;
-  const hint = pending ? '這樣摺可以嗎？' : busy ? '摺摺摺…' : (HINT[tool][phase] ?? '');
+  const hint = pending ? '這樣摺可以嗎？' : busy ? '摺摺摺…' : (HINT[activeTool][phase] ?? '');
 
   return (
     <div class="app">
@@ -198,15 +224,17 @@ export function App() {
           {(Object.keys(TOOL_LABEL) as Tool[]).map((t) => (
             <button
               key={t}
-              class={`tool ${tool === t ? 'selected' : ''}`}
-              disabled={busy}
+              class={`tool ${activeTool === t ? 'selected' : ''}`}
+              disabled={busy || reverseOpts !== null || (t === 'reverse' && !halved)}
+              title={t === 'reverse' && !halved ? '先按「對摺」才能反摺喔' : ''}
               onClick={() => {
                 setPending(null);
+                setReverseOpts(null);
                 setTool(t);
               }}
             >
               <span class="icon">{TOOL_LABEL[t].icon}</span>
-              <span>{TOOL_LABEL[t].text}</span>
+              <span>{TOOL_LABEL[t].text}{t === 'reverse' && !halved ? '（先對摺）' : ''}</span>
             </button>
           ))}
           <div class="mirror-badge" title="摺一邊，另一邊會自動一起摺">
@@ -217,16 +245,20 @@ export function App() {
         <div class="stage">
           <Editor
             state={state}
-            tool={tool}
+            tool={activeTool}
             pending={pending}
             animation={animation}
             resetKey={resetKey}
+            onReverse={onReverse}
+            locked={reverseOpts !== null}
             onPropose={setPending}
             onError={onError}
             onPhase={setPhase}
           />
           <div class="hintbar">
-            {confirmNew ? (
+            {reverseOpts ? (
+              <ReversePicker options={reverseOpts.options} onPick={pickReverse} onCancel={cancelReverse} />
+            ) : confirmNew ? (
               <>
                 <span class="hint">要換一張新的白紙嗎？</span>
                 <button

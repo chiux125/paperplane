@@ -3,6 +3,7 @@ import type { Vec2 } from './geom/vec';
 import type { PaperState } from './model/types';
 import { crease } from './planners/crease';
 import { flipOutcome } from './planners/flip';
+import { type ReverseStyle, reverseFold } from './planners/reverseFold';
 import { type FoldOutcome, simpleFoldOutcome } from './planners/simpleFold';
 import { symmetricFoldOutcome } from './planners/symmetricFold';
 import { type Result, ok } from './result';
@@ -22,6 +23,7 @@ export type UserOp =
       readonly mirror?: boolean;
     }
   | { readonly kind: 'crease'; readonly line: Line }
+  | { readonly kind: 'reverse'; readonly line: Line; readonly pick: Vec2; readonly style: ReverseStyle }
   | { readonly kind: 'flip' };
 
 export function applyOpOutcome(state: PaperState, op: UserOp): Result<FoldOutcome> {
@@ -34,6 +36,8 @@ export function applyOpOutcome(state: PaperState, op: UserOp): Result<FoldOutcom
       const r = crease(state, op.line);
       return r.ok ? ok({ state: r.value, movers: [] }) : r;
     }
+    case 'reverse':
+      return reverseFold(state, op.line, op.pick, op.style);
     case 'flip':
       return ok(flipOutcome(state));
   }

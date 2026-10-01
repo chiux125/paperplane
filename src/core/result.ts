@@ -5,7 +5,8 @@ export type FoldError =
   | 'too-thin' // 會切出極細的碎片
   | 'crosses-center' // 鏡像模式下，這一摺會跨過中線，左右兩邊會疊在一起
   | 'same-point' // 點對點：兩個點是同一點
-  | 'same-line'; // 邊對邊：兩條邊已經在同一直線上
+  | 'same-line' // 邊對邊：兩條邊已經在同一直線上
+  | 'reverse-pierces'; // 反摺：這種摺法會穿過紙
 
 export type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: FoldError };
 

@@ -15,6 +15,7 @@ export * from './planners/simpleFold';
 export * from './planners/flip';
 export * from './planners/symmetricFold';
 export * from './planners/crease';
+export * from './planners/reverseFold';
 export * from './construct/snap';
 export * from './construct/constructions';
 export * from './physics/mass';
