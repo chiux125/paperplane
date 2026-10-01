@@ -1,26 +1,41 @@
 import type { Line } from './geom/line';
 import type { Vec2 } from './geom/vec';
 import type { PaperState } from './model/types';
-import { flip } from './planners/flip';
-import { simpleFold } from './planners/simpleFold';
+import { flipOutcome } from './planners/flip';
+import { type FoldOutcome, simpleFoldOutcome } from './planners/simpleFold';
+import { symmetricFoldOutcome } from './planners/symmetricFold';
 import { type Result, ok } from './result';
 
 /**
  * 使用者做的一步操作。只記錄「幾何意圖」（摺線、點了哪一側、選了哪個選項），
  * 不記錄面的 id，所以從白紙重播一定得到相同結果，也可以拿來產生步驟圖。
- * 之後的階段會在這裡加新的種類（鏡像、內翻／外翻、壓摺…），不影響既有的。
+ * 之後的階段會在這裡加新的種類（內翻／外翻、壓摺…），不影響既有的。
  */
 export type UserOp =
-  | { readonly kind: 'fold'; readonly line: Line; readonly pick: Vec2; readonly place: 'top' | 'bottom' }
+  | {
+      readonly kind: 'fold';
+      readonly line: Line;
+      readonly pick: Vec2;
+      readonly place: 'top' | 'bottom';
+      /** 鏡像模式：另一邊自動對稱地摺。 */
+      readonly mirror?: boolean;
+    }
   | { readonly kind: 'flip' };
 
-export function applyOp(state: PaperState, op: UserOp): Result<PaperState> {
+export function applyOpOutcome(state: PaperState, op: UserOp): Result<FoldOutcome> {
   switch (op.kind) {
     case 'fold':
-      return simpleFold(state, op.line, op.pick, op.place);
+      return op.mirror
+        ? symmetricFoldOutcome(state, op.line, op.pick, op.place)
+        : simpleFoldOutcome(state, op.line, op.pick, op.place);
     case 'flip':
-      return ok(flip(state));
+      return ok(flipOutcome(state));
   }
+}
+
+export function applyOp(state: PaperState, op: UserOp): Result<PaperState> {
+  const r = applyOpOutcome(state, op);
+  return r.ok ? ok(r.value.state) : r;
 }
 
 /**
@@ -44,14 +59,18 @@ export const redo = (h: History): History => (canRedo(h) ? { ...h, cursor: h.cur
 /** 目前這一步之前做過的操作（給步驟圖、存檔用）。 */
 export const doneOps = (h: History): readonly UserOp[] => h.ops.slice(0, h.cursor);
 
-export function push(h: History, op: UserOp): Result<History> {
-  const r = applyOp(current(h), op);
-  if (!r.ok) return r;
-  return ok({
-    states: [...h.states.slice(0, h.cursor + 1), r.value],
+/** 記錄一個已經算好的結果（UI 先算出來做預覽和動畫，確認後再存進來，不用重算）。 */
+export function pushApplied(h: History, op: UserOp, next: PaperState): History {
+  return {
+    states: [...h.states.slice(0, h.cursor + 1), next],
     ops: [...h.ops.slice(0, h.cursor), op],
     cursor: h.cursor + 1,
-  });
+  };
+}
+
+export function push(h: History, op: UserOp): Result<History> {
+  const r = applyOp(current(h), op);
+  return r.ok ? ok(pushApplied(h, op, r.value)) : r;
 }
 
 /** 從白紙依序重播所有操作。 */

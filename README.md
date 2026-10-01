@@ -17,10 +17,12 @@ npm run build      # 型別檢查＋打包
   - `geom/`：向量、直線、等距變換、凸多邊形運算
   - `model/`：面（Face）、鉸鏈（Hinge）、層序（Orders）、紙張狀態
   - `engine/`：兩個基本動作 `splitFaces`（沿線切開）與 `moveFaces`（分組移動＋指定層序）
-  - `planners/`：把使用者的意圖換算成基本動作（簡單摺、翻面；之後加內翻／外翻／壓摺）
+  - `planners/`：把使用者的意圖換算成基本動作（簡單摺、鏡像摺、翻面；之後加內翻／外翻／壓摺）
+  - `construct/`：三種摺法的摺線（自由畫線、點對點、邊對邊）與吸附
+  - `physics/`：重量與重心
   - `validate/`：合法性檢查（凸性、撕裂、層序、穿紙）
   - `history.ts`：可重播的操作紀錄、復原／重做
-- `src/ui/`：介面（Preact＋Canvas）
+- `src/ui/`：介面（Preact＋Canvas），`editor/` 是摺紙編輯區（互動、預覽、動畫）
 - `tests/`：核心的單元測試
 
 座標單位是 mm。原紙座標 x ∈ [-寬/2, 寬/2]（x = 0 是機身中線），y ∈ [0, 高]（y = 高 是機頭）。

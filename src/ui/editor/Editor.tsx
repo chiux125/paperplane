@@ -1,0 +1,214 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import {
+  type FoldError,
+  type FoldOutcome,
+  type FoldSpec,
+  type Line,
+  type PaperState,
+  type Result,
+  type Seg,
+  type UserOp,
+  type Vec2,
+  add,
+  applyOpOutcome,
+  closestOnSeg,
+  dist,
+  edgeToEdge,
+  freeLineFold,
+  midpoint,
+  nearestSegment,
+  ok,
+  paperMass,
+  perp,
+  pointToPoint,
+  scale,
+  signedDist,
+  snapPoint,
+  snapSources,
+} from '../../core';
+import { type Folding, render } from './render';
+import { fitView, toWorld } from './view';
+
+export type Tool = 'line' | 'point' | 'edge';
+
+/** 一個算好、等孩子確認的摺法。 */
+export interface Proposal {
+  readonly op: UserOp;
+  readonly outcome: FoldOutcome;
+}
+
+type Phase =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'drawing'; readonly a: Vec2; readonly b: Vec2 }
+  | { readonly kind: 'side'; readonly a: Vec2; readonly b: Vec2; readonly left: Result<Proposal>; readonly right: Result<Proposal> }
+  | { readonly kind: 'pointA'; readonly a: Vec2 }
+  | { readonly kind: 'edgeFrom'; readonly from: Seg; readonly grab: Vec2 };
+
+export type PhaseKind = Phase['kind'];
+
+// 吸附半徑（px）
+const SNAP_PX = 14;
+const EDGE_PX = 12;
+
+export interface EditorProps {
+  readonly state: PaperState;
+  readonly tool: Tool;
+  /** 等待確認中的摺法（鎖定預覽）。 */
+  readonly pending: Proposal | null;
+  /** 播放摺疊動畫中。 */
+  readonly animation: { readonly proposal: Proposal; readonly theta: number } | null;
+  /** 改變這個值會清除進行到一半的操作。 */
+  readonly resetKey: number;
+  readonly onPropose: (p: Proposal) => void;
+  readonly onError: (e: FoldError) => void;
+  readonly onPhase: (p: PhaseKind) => void;
+}
+
+function propose(state: PaperState, spec: Result<FoldSpec>): Result<Proposal> {
+  if (!spec.ok) return spec;
+  // 鏡像模式預設開啟
+  const op: UserOp = { kind: 'fold', line: spec.value.line, pick: spec.value.pick, place: 'top', mirror: true };
+  const outcome = applyOpOutcome(state, op);
+  return outcome.ok ? ok({ op, outcome: outcome.value }) : outcome;
+}
+
+export function Editor(props: EditorProps) {
+  const { state, tool, pending, animation } = props;
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
+  const [hover, setHover] = useState<Vec2 | null>(null);
+
+  useLayoutEffect(() => {
+    const el = canvas.current!;
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => setPhase({ kind: 'idle' }), [state, tool, props.resetKey]);
+  useEffect(() => props.onPhase(phase.kind), [phase.kind]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPhase({ kind: 'idle' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const view = useMemo(() => fitView(state, size.w || 1, size.h || 1), [state, size]);
+  const sources = useMemo(() => snapSources(state), [state]);
+  const cg = useMemo(() => paperMass(state).cg, [state]);
+  const busy = pending !== null || animation !== null;
+
+  const snap = hover && !busy && tool !== 'edge' && phase.kind !== 'side' ? snapPoint(sources, hover, SNAP_PX / view.k) : null;
+  const hoverEdge = hover && !busy && tool === 'edge' ? nearestSegment(sources.segments, hover, EDGE_PX / view.k) : null;
+  const snapped = (w: Vec2) => snapPoint(sources, w, SNAP_PX / view.k).point;
+
+  // 滑鼠停著的時候就先預覽
+  const hoverKey = snap ? `${snap.point.x},${snap.point.y}` : hoverEdge ? `${hoverEdge[0].x},${hoverEdge[0].y},${hoverEdge[1].x},${hoverEdge[1].y}` : '';
+  const hoverSide = phase.kind === 'side' && hover ? (sideOf(phase, hover) > 0 ? 'left' : 'right') : null;
+  const hoverProposal = useMemo((): Result<Proposal> | null => {
+    if (busy) return null;
+    if (phase.kind === 'side' && hoverSide) return phase[hoverSide];
+    if (phase.kind === 'pointA' && snap && dist(snap.point, phase.a) > 1e-6) return propose(state, pointToPoint(phase.a, snap.point));
+    if (phase.kind === 'edgeFrom' && hoverEdge) return propose(state, edgeToEdge(phase.from, phase.grab, hoverEdge));
+    return null;
+  }, [phase, hoverKey, hoverSide, busy, state]);
+
+  useEffect(() => {
+    if (!canvas.current || size.w === 0) return;
+    let folding: Folding | null = null;
+    if (animation) folding = { outcome: animation.proposal.outcome, theta: animation.theta, preview: false };
+    else if (pending) folding = { outcome: pending.outcome, theta: 0, preview: true };
+    else if (hoverProposal?.ok) folding = { outcome: hoverProposal.value.outcome, theta: 0, preview: true };
+
+    const foldLines: Line[] = folding && !animation ? folding.outcome.movers.map((m) => m.line) : [];
+    const edges: { seg: Seg; color: string }[] = [];
+    if (phase.kind === 'edgeFrom' && !animation) edges.push({ seg: phase.from, color: '#f08c00' });
+    if (hoverEdge) edges.push({ seg: hoverEdge, color: phase.kind === 'edgeFrom' ? '#2b9a66' : '#2f6fb3' });
+
+    render(canvas.current, {
+      state,
+      view,
+      folding,
+      foldLines,
+      drawingSeg: phase.kind === 'drawing' || (phase.kind === 'side' && !folding) ? [phase.a, phase.b] : null,
+      markers: phase.kind === 'pointA' && !animation ? [phase.a] : [],
+      edges,
+      snap,
+      cg,
+      previewCg: folding?.preview ? paperMass(folding.outcome.state).cg : null,
+    });
+  });
+
+  const world = (e: PointerEvent): Vec2 => {
+    const r = canvas.current!.getBoundingClientRect();
+    return toWorld(view, e.clientX - r.left, e.clientY - r.top);
+  };
+
+  const submit = (r: Result<Proposal>) => {
+    if (r.ok) props.onPropose(r.value);
+    else props.onError(r.error);
+  };
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (busy || e.button !== 0) return;
+    const w = world(e);
+    if (tool === 'line') {
+      if (phase.kind === 'side') {
+        submit(sideOf(phase, w) > 0 ? phase.left : phase.right);
+      } else {
+        const a = snapped(w);
+        canvas.current!.setPointerCapture(e.pointerId);
+        setPhase({ kind: 'drawing', a, b: a });
+      }
+    } else if (tool === 'point') {
+      const p = snapped(w);
+      if (phase.kind === 'pointA') submit(propose(state, pointToPoint(phase.a, p)));
+      else setPhase({ kind: 'pointA', a: p });
+    } else {
+      const seg = nearestSegment(sources.segments, w, EDGE_PX / view.k);
+      if (!seg) return;
+      if (phase.kind === 'edgeFrom') submit(propose(state, edgeToEdge(phase.from, phase.grab, seg)));
+      else setPhase({ kind: 'edgeFrom', from: seg, grab: closestOnSeg(w, seg[0], seg[1]) });
+    }
+  };
+
+  const onPointerMove = (e: PointerEvent) => {
+    const w = world(e);
+    setHover(w);
+    if (phase.kind === 'drawing') setPhase({ ...phase, b: snapped(w) });
+  };
+
+  const onPointerUp = () => {
+    if (phase.kind !== 'drawing') return;
+    const { a, b } = phase;
+    if (dist(a, b) * view.k < 8) {
+      setPhase({ kind: 'idle' });
+      return;
+    }
+    // 兩邊各算一次，孩子移動滑鼠時就能馬上看到預覽
+    const n = perp(scale({ x: b.x - a.x, y: b.y - a.y }, 1 / dist(a, b)));
+    const m = midpoint(a, b);
+    const side = (k: number) => propose(state, freeLineFold(a, b, add(m, scale(n, k))));
+    setPhase({ kind: 'side', a, b, left: side(1), right: side(-1) });
+  };
+
+  return (
+    <canvas
+      ref={canvas}
+      class="editor"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={() => setHover(null)}
+    />
+  );
+}
+
+function sideOf(phase: { a: Vec2; b: Vec2 }, w: Vec2): number {
+  const d = dist(phase.a, phase.b);
+  const line = { p: phase.a, d: { x: (phase.b.x - phase.a.x) / d, y: (phase.b.y - phase.a.y) / d } };
+  return signedDist(line, w);
+}
