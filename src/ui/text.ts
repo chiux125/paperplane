@@ -7,6 +7,8 @@ export const REVERSE_LABEL: Record<ReverseStyle, { icon: string; text: string }>
   under: { icon: '🔽', text: '收到下面' },
   inside: { icon: '📥', text: '塞進裡面' },
   outside: { icon: '🤲', text: '包在外面' },
+  'top-over': { icon: '☝️', text: '只摺最上面那片' },
+  'top-under': { icon: '👇', text: '只摺最上面（收起）' },
 };
 
 /** 穩定度提示（給 8 歲孩子看的話）。 */

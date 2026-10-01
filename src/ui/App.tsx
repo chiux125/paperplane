@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   type FoldError,
   type Line,
@@ -9,6 +9,7 @@ import {
   applyOp,
   applyOpOutcome,
   canRedo,
+  reverseFold,
   reverseFoldOptions,
   canUndo,
   createHistory,
@@ -138,6 +139,18 @@ export function App() {
   const cancelReverse = () => {
     setReverseOpts(null);
     setResetKey((k) => k + 1);
+  };
+
+  // 一般摺法：如果「只摺最上面那片」可行且和整疊摺不同，就多給一個選項（不多出操作步驟）。
+  const topOnly = useMemo(() => {
+    if (!pending || pending.op.kind !== 'fold') return null;
+    const r = reverseFold(state, pending.op.line, pending.op.pick, 'top-over');
+    return r.ok ? r.value : null;
+  }, [pending, state]);
+  const applyTopOnly = () => {
+    if (!pending || pending.op.kind !== 'fold' || !topOnly) return;
+    const op: UserOp = { kind: 'reverse', line: pending.op.line, pick: pending.op.pick, style: 'top-over' };
+    play({ op, outcome: topOnly });
   };
 
   const doUndo = () => {
@@ -303,6 +316,11 @@ export function App() {
                     <button class="yes" onClick={confirm}>
                       ✅ 摺！
                     </button>
+                    {topOnly && (
+                      <button class="toponly" title="只把最上面那一片翻過去，底下的紙不動" onClick={applyTopOnly}>
+                        ☝️ 只摺最上面
+                      </button>
+                    )}
                     <button class="crease" title="摺一下再攤開，留下摺痕當記號" onClick={() => makeCrease(pending)}>
                       📑 留摺痕
                     </button>

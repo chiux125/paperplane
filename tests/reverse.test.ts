@@ -8,7 +8,10 @@ import {
   current,
   doneOps,
   faceList,
+  facesOverlap,
   foldedPolygon,
+  getOrder,
+  isFaceUp,
   near,
   paperMass,
   push,
@@ -92,5 +95,72 @@ describe('反摺：直接做某一種（給重播）', () => {
     expectValid(current(h));
     const again = unwrap(replay(base, doneOps(h)));
     expect(current(again).orders).toEqual(current(h).orders);
+  });
+});
+
+describe('只摺最上面那片', () => {
+  // 對摺後的 2 層長條（x∈[0,50]）。頂層（背面朝上）蓋在底層（正面朝上）上。
+  // 在右上角附近切，只摺頂層那一小塊角。
+  const rev = { line: line(50, 160, 20, 200), pick: pt(45, 190) };
+
+  it('重現情境：只有最上面那片翻過來、底下白紙不動', () => {
+    const s = halved();
+    const opts = reverseFoldOptions(s, rev.line, rev.pick);
+    const top = opts.find((o) => o.style === 'top-over')!;
+    const over = opts.find((o) => o.style === 'over')!;
+    expect(top).toBeDefined();
+    expect(over).toBeDefined();
+
+    // 只動一片（頂層尖角）；整疊摺會動兩片（還包含底下那層）
+    expect(top.outcome.movers[0].faces.length).toBe(1);
+    expect(top.outcome.movers[0].faces.length).toBeLessThan(over.outcome.movers[0].faces.length);
+    expectValid(top.outcome.state);
+
+    // 移動的那片：原本背面朝上，翻過來變正面朝上，而且疊在它蓋到的每一面上方
+    const movedId = top.outcome.movers[0].faces[0];
+    const moved = top.outcome.state.faces.get(movedId)!;
+    expect(isFaceUp(moved)).toBe(true);
+    for (const f of faceList(top.outcome.state)) {
+      if (f.id !== movedId && facesOverlap(moved, f)) {
+        expect(getOrder(top.outcome.state.orders, movedId, f.id)).toBe(1);
+      }
+    }
+
+    // 底下的紙完全不動：除了那一片，其餘每一面的 xf 都和「摺之前（已沿線切開）」一模一樣
+    const overMoved = new Set(over.outcome.movers[0].faces); // over 會動到的全部面
+    for (const f of faceList(top.outcome.state)) {
+      if (f.id === movedId) continue;
+      // 不是這次移動的面 → 在 over（整疊摺）裡若也沒被移動，xf 應完全相同
+      if (!overMoved.has(f.id)) {
+        const g = over.outcome.state.faces.get(f.id);
+        if (g) expect(f.xf).toEqual(g.xf);
+      }
+    }
+  });
+
+  it('白紙只有一層 → 不會出現「只摺最上面」', () => {
+    const opts = reverseFoldOptions(createSheet(), line(-105, 250, -55, 297), pt(-90, 292));
+    expect(opts.some((o) => o.style === 'top-over')).toBe(false);
+  });
+
+  it('可以存進歷史並重播', () => {
+    const base = halved();
+    const op: UserOp = { kind: 'reverse', line: rev.line, pick: rev.pick, style: 'top-over' };
+    const h = unwrap(push(createHistory(base), op));
+    expectValid(current(h));
+    const again = unwrap(replay(base, doneOps(h)));
+    expect(current(again).orders).toEqual(current(h).orders);
+  });
+
+  it('對摺前：只摺最上面也會左右一起（鏡像、對稱）', () => {
+    // 把上緣往下摺（水平線、自身對稱）→ 上方有 2 層，左右對稱
+    const folded = unwrap(simpleFold(createSheet(), line(0, 200, 1, 200), pt(0, 290)));
+    const opts = reverseFoldOptions(folded, line(105, 130, 80, 103), pt(100, 110));
+    const top = opts.find((o) => o.style === 'top-over')!;
+    expect(top).toBeDefined();
+    expectValid(top.outcome.state);
+    expect(paperMass(top.outcome.state).cg.x).toBeCloseTo(0, 5); // 左右一起 → 對稱
+    const moved = top.outcome.movers.reduce((n, m) => n + m.faces.length, 0);
+    expect(moved).toBe(2); // 左右各一片
   });
 });

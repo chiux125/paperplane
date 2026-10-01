@@ -448,6 +448,15 @@ h1 {
   background: #d98a2b;
 }
 
+.toponly {
+  min-width: 120px;
+  min-height: 56px;
+  font-size: 20px;
+  border-radius: 16px;
+  color: white;
+  background: #4a90d9;
+}
+
 .reverse-picker {
   display: flex;
   align-items: center;
