@@ -110,7 +110,8 @@ export function Preview3D(props: Preview3DProps) {
     }
 
     const box = new THREE.Box3();
-    const allPos: number[] = []; // 收集所有三角形，最後合併成一份來抽輪廓線
+    // 每一條邊：記下用到它的每一片的法向量，用來判斷相接的兩片是不是同一平面。
+    const edgeMap = new Map<string, { a: THREE.Vector3; b: THREE.Vector3; n: THREE.Vector3 }[]>();
 
     for (const piece of props.assembly.pieces) {
       const verts = piece.poly.map(m);
@@ -122,7 +123,6 @@ export function Preview3D(props: Preview3DProps) {
         pos.push(verts[i].x, verts[i].y, verts[i].z);
         pos.push(verts[i + 1].x, verts[i + 1].y, verts[i + 1].z);
       }
-      allPos.push(...pos);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.computeVertexNormals();
@@ -131,14 +131,34 @@ export function Preview3D(props: Preview3DProps) {
         side: THREE.DoubleSide,
       });
       grp.add(new THREE.Mesh(geo, mat));
+
+      const n = faceNormal(verts);
+      for (let i = 0; i < verts.length; i++) {
+        const a = verts[i];
+        const b = verts[(i + 1) % verts.length];
+        const key = edgeKey(a, b);
+        (edgeMap.get(key) ?? edgeMap.set(key, []).get(key)!).push({ a, b, n });
+      }
     }
 
-    // 只畫「真正的轉折（紙彎折處）＋每一層的外緣」；同一平面內的摺痕用角度門檻（20°）隱藏。
-    const merged = new THREE.BufferGeometry();
-    merged.setAttribute('position', new THREE.Float32BufferAttribute(allPos, 3));
-    const outline = new THREE.EdgesGeometry(merged, 20);
+    // 只畫「每一層的外緣／層與層交界」＝被單獨一片用到的邊，以及「真正的彎折」＝兩片不同平面相接。
+    // 兩片在同一平面相接的邊（攤平的摺痕或對摺回來的邊）都隱藏。
+    const COPLANAR = Math.cos((15 * Math.PI) / 180);
+    const linePos: number[] = [];
+    for (const recs of edgeMap.values()) {
+      let hide = false;
+      for (let i = 0; i < recs.length && !hide; i++) {
+        for (let j = i + 1; j < recs.length; j++) {
+          if (Math.abs(recs[i].n.dot(recs[j].n)) > COPLANAR) { hide = true; break; }
+        }
+      }
+      if (hide) continue;
+      const { a, b } = recs[0];
+      linePos.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    }
+    const outline = new THREE.BufferGeometry();
+    outline.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
     grp.add(new THREE.LineSegments(outline, new THREE.LineBasicMaterial({ color: EDGE })));
-    merged.dispose();
 
     const size = box.getSize(new THREE.Vector3()).length() || 100;
     const markR = size * 0.025;
@@ -170,5 +190,26 @@ function sphere(p: THREE.Vector3, radius: number, color: number): THREE.Mesh {
   );
   mesh.position.copy(p);
   return mesh;
+}
+
+/** 平面多邊形的法向量（Newell 法，對任何朝向都穩定）。 */
+function faceNormal(verts: THREE.Vector3[]): THREE.Vector3 {
+  const n = new THREE.Vector3();
+  for (let i = 0; i < verts.length; i++) {
+    const c = verts[i];
+    const d = verts[(i + 1) % verts.length];
+    n.x += (c.y - d.y) * (c.z + d.z);
+    n.y += (c.z - d.z) * (c.x + d.x);
+    n.z += (c.x - d.x) * (c.y + d.y);
+  }
+  return n.lengthSq() < 1e-12 ? new THREE.Vector3(0, 1, 0) : n.normalize();
+}
+
+/** 把一條邊量化成 key（端點取 0.2mm 精度、排序），讓重合的邊歸成同一條。 */
+function edgeKey(a: THREE.Vector3, b: THREE.Vector3): string {
+  const q = (v: THREE.Vector3) => `${Math.round(v.x * 5)},${Math.round(v.y * 5)},${Math.round(v.z * 5)}`;
+  const ka = q(a);
+  const kb = q(b);
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 }
 
