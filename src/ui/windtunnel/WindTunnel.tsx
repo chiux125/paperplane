@@ -34,47 +34,59 @@ interface Particle {
 /** 從立體飛機算出畫風洞要用的幾何（都隨設計改變）。 */
 interface Geom {
   incidence: number; // 機翼內建攻角（弧度）
-  chord: number;
-  finFrac: number; // 尾鰭深度 / 翼弦
-  cgFrac: number; // 重心沿翼弦的位置（前緣 0、後緣 1）
-  cpFrac: number; // 升力中心沿翼弦的位置
-  top: { chord: number; halfSpan: number; wings: Vec2[][]; fuse: Vec2[][] }; // 俯視投影（u=順流距離, v=翼展）
+  /** 側面投影（世界座標：x=前後 y、y=上下 z）：真正的飛機側影，隨機翼位置／斜度／上反角改變。 */
+  side: {
+    chord: number; // 機翼翼弦（前後長，mm）
+    center: Vec2; // 機翼形心（y, z）
+    wings: Vec2[][];
+    fuse: Vec2[][];
+    cg: Vec2; // 重心（y, z）
+    cp: Vec2; // 升力中心（y, z）
+  };
+  /** 俯視投影（u=離機頭的順流距離, v=翼展）。 */
+  top: { chord: number; halfSpan: number; wings: Vec2[][]; fuse: Vec2[][] };
 }
 
-function buildGeom(assembly: Assembly, cgY: number, cpY: number): Geom {
+function buildGeom(assembly: Assembly, cg: { y: number; z: number }, cp: { y: number; z: number }): Geom {
   let yLE = -Infinity;
-  let zMin = Infinity;
-  let zMax = -Infinity;
+  let cx = 0;
+  let cz = 0;
+  let n = 0;
   for (const p of assembly.pieces) {
-    if (p.region === 'wing') for (const v of p.poly) yLE = Math.max(yLE, v.y);
-    if (p.region === 'fuselage') for (const v of p.poly) {
-      zMin = Math.min(zMin, v.z);
-      zMax = Math.max(zMax, v.z);
+    if (p.region !== 'wing') continue;
+    for (const v of p.poly) {
+      yLE = Math.max(yLE, v.y);
+      cx += v.y;
+      cz += v.z;
+      n++;
     }
   }
   const chord = wingChord(assembly) || 100;
-  const finFrac = Number.isFinite(zMax) ? Math.min(0.6, Math.max(0.1, (zMax - zMin) / chord)) : 0.3;
-  const frac = (y: number) => (yLE - y) / chord;
+  const center = n > 0 ? vec(cx / n, cz / n) : vec(0, 0);
+
+  // 側面投影：直接取立體飛機每一面的 (y, z)
+  const sideWings: Vec2[][] = [];
+  const sideFuse: Vec2[][] = [];
+  for (const p of assembly.pieces) {
+    const poly = p.poly.map((v) => vec(v.y, v.z));
+    (p.region === 'wing' ? sideWings : sideFuse).push(poly);
+  }
 
   // 俯視投影：u = 離機頭的順流距離、v = 翼展位置
   let halfSpan = 1;
-  const proj = (poly: readonly { x: number; y: number }[]) =>
+  const projTop = (poly: readonly { x: number; y: number }[]) =>
     poly.map((p) => {
       halfSpan = Math.max(halfSpan, Math.abs(p.x));
       return vec(yLE - p.y, p.x);
     });
-  const wings: Vec2[][] = [];
-  const fuse: Vec2[][] = [];
-  for (const p of assembly.pieces) {
-    (p.region === 'wing' ? wings : fuse).push(proj(p.poly));
-  }
+  const topWings: Vec2[][] = [];
+  const topFuse: Vec2[][] = [];
+  for (const p of assembly.pieces) (p.region === 'wing' ? topWings : topFuse).push(projTop(p.poly));
+
   return {
     incidence: assembly.wingIncidence,
-    chord,
-    finFrac,
-    cgFrac: frac(cgY),
-    cpFrac: frac(cpY),
-    top: { chord, halfSpan, wings, fuse },
+    side: { chord, center, wings: sideWings, fuse: sideFuse, cg: vec(cg.y, cg.z), cp: vec(cp.y, cp.z) },
+    top: { chord, halfSpan, wings: topWings, fuse: topFuse },
   };
 }
 
@@ -97,7 +109,7 @@ export function WindTunnel(props: WindTunnelProps) {
   const mass = useMemo(() => assemblyMass(assembly, design.clips), [assembly, design.clips]);
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
   const stab = useMemo(() => stability(mass.cg, planform.cp, planform.meanChord), [mass, planform]);
-  const geom = useMemo(() => buildGeom(assembly, mass.cg.y, planform.cp.y), [assembly, mass, planform]);
+  const geom = useMemo(() => buildGeom(assembly, mass.cg, planform.cp), [assembly, mass, planform]);
 
   const incidenceDeg = (geom.incidence * 180) / Math.PI;
   const effDeg = alphaDeg + incidenceDeg; // 風洞看到的實際攻角 = 滑桿 + 機翼內建攻角
@@ -158,7 +170,7 @@ export function WindTunnel(props: WindTunnelProps) {
         ctx.fillRect(0, 0, w, h);
         init();
       }
-      const { effRad: alpha, geom: g, stalled: st } = live.current;
+      const { effRad: alpha, geom: g } = live.current;
       const pl = plate(alpha);
 
       ctx.fillStyle = BG_FADE;
@@ -188,7 +200,7 @@ export function WindTunnel(props: WindTunnelProps) {
         ctx.lineTo(X(p.x), Y(p.y));
         ctx.stroke();
       }
-      drawSidePlane(ctx, pl, g, X, Y, geo.s, st);
+      drawSidePlane(ctx, g, alpha, X, Y, geo.s);
       windLabel(ctx);
       raf = requestAnimationFrame(frame);
     };
@@ -333,33 +345,40 @@ function noPenetrate(p: Particle, pl: ReturnType<typeof plate>) {
 
 type Proj = (f: number) => number;
 
-function drawSidePlane(
-  ctx: CanvasRenderingContext2D,
-  pl: ReturnType<typeof plate>,
-  g: Geom,
-  X: Proj,
-  Y: Proj,
-  s: number,
-  _stalled: boolean,
-) {
-  const S = (p: Vec2) => ({ x: X(p.x), y: Y(p.y) });
-  const on = (frac: number, up: number) =>
-    vec(pl.le.x + pl.dir.x * frac + pl.nUp.x * up, pl.le.y + pl.dir.y * frac + pl.nUp.y * up);
+/**
+ * 畫真正的飛機側影：把立體飛機的側面投影（y, z）對齊到風洞裡的機翼剖面。
+ * 轉換 M 把機翼形心放到原點、翼弦縮成 1、依「滑桿攻角」轉（機翼內建攻角已經在幾何裡），
+ * 並做一次鏡射（機頭朝左）；因此機翼實際落在「滑桿 + 內建攻角」＝實際攻角，和煙線的流場一致。
+ */
+function drawSidePlane(ctx: CanvasRenderingContext2D, g: Geom, alpha: number, X: Proj, Y: Proj, s: number) {
+  const aM = alpha - g.incidence; // 幾何已含內建攻角，這裡只多轉滑桿的部分
+  const c = Math.cos(aM);
+  const sn = Math.sin(aM);
+  const { center: C, chord } = g.side;
+  const ch = chord || 1;
+  const T = (p: Vec2) => {
+    const dx = p.x - C.x;
+    const dz = p.y - C.y;
+    return { x: X((-c * dx + sn * dz) / ch), y: Y((sn * dx + c * dz) / ch) };
+  };
 
-  // 尾鰭
-  const finTop = on(0.5, 0);
-  fillPoly(ctx, [S(finTop), S(on(1, -g.finFrac)), S(pl.te)], '#e6c36a', '#6b5b45');
-  // 機翼薄板
-  fillPoly(ctx, [S(pl.le), S(pl.te), S(on(1, -0.02)), S(on(0, -0.02))], '#fdfbf5', '#6b5b45');
-  // 機頭
-  const nose = S(pl.le);
-  ctx.beginPath();
-  ctx.arc(nose.x, nose.y, Math.max(3, s * 0.02), 0, 2 * Math.PI);
-  ctx.fillStyle = '#6b5b45';
-  ctx.fill();
-  // 重心（紅）與升力中心（藍）
-  mark(ctx, S(on(g.cpFrac, 0.05)), '#2f6fb3', '升力');
-  mark(ctx, S(on(g.cgFrac, -0.05)), '#e5484d', '重心');
+  for (const poly of g.side.fuse) fillPoly(ctx, poly.map(T), '#e6c36a', '#6b5b45');
+  for (const poly of g.side.wings) fillPoly(ctx, poly.map(T), '#fdfbf5', '#6b5b45');
+
+  // 機頭小圓點（側影裡最靠機頭、也就是世界 y 最大的那個機翼頂點）
+  let nose: Vec2 | null = null;
+  let best = -Infinity;
+  for (const poly of g.side.wings) for (const p of poly) if (p.x > best) { best = p.x; nose = p; }
+  if (nose) {
+    const n = T(nose);
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, Math.max(3, s * 0.02), 0, 2 * Math.PI);
+    ctx.fillStyle = '#6b5b45';
+    ctx.fill();
+  }
+
+  mark(ctx, T(g.side.cp), '#2f6fb3', '升力');
+  mark(ctx, T(g.side.cg), '#e5484d', '重心');
 }
 
 function mark(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, color: string, label: string) {
