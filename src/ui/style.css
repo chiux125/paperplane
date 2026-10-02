@@ -230,6 +230,19 @@ h1 {
   text-align: center;
 }
 
+.chip.flap-drop {
+  min-height: 30px;
+  margin-left: 10px;
+  padding: 0 10px;
+  font-size: 15px;
+}
+
+.flap-hint {
+  font-size: 16px;
+  color: #a35a00;
+  line-height: 28px;
+}
+
 /* ── 風洞（階段 3） ───────────────────────────── */
 .windtunnel {
   flex: 1;

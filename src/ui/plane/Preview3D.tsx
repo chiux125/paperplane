@@ -1,12 +1,17 @@
 import { useEffect, useRef } from 'preact/hooks';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { type DisplayPiece, PAPER_THICKNESS, type Paperclip, type Vec3 } from '../../core';
+import { type DisplayPiece, type FaceId, PAPER_THICKNESS, type Paperclip, type Vec3 } from '../../core';
 
 // 和 2D 編輯區一致的顏色（render.ts）。
 const FRONT = 0xfdfbf5;
 const BACK = 0xf6c667;
 const EDGE = 0x6b5b45;
+// 翼片點選：滑鼠指著（暖色）、已選（藍色），用自發光疊一層顏色。
+const HOVER_GLOW = 0xff8a00;
+const SELECTED_GLOW = 0x1c64c8;
+/** 按下到放開移動不超過這麼多 px 才算「點一下」，超過就是在轉飛機。 */
+const CLICK_PX = 5;
 
 /** 本專案座標（x 翼展、y 前後機頭 +y、z 上下）→ Three（Y 朝上）。 */
 const m = (v: Vec3) => new THREE.Vector3(v.x, v.z, -v.y);
@@ -17,6 +22,16 @@ export interface Preview3DProps {
   readonly cg: Vec3;
   readonly cp: Vec3;
   readonly clips: readonly Paperclip[];
+  /** 滑鼠指著時要發亮的面（通常是可以翹的翼片和它對稱的那片）。 */
+  readonly hovered?: ReadonlySet<FaceId>;
+  /** 已選中的面。 */
+  readonly selected?: ReadonlySet<FaceId>;
+  /** 滑鼠指到的最外層紙片換了（沒指到任何紙片是 null）。 */
+  readonly onHover?: (id: FaceId | null) => void;
+  /** 點了一下（不是拖曳轉動）：點到的最外層紙片，點到空白處是 null。 */
+  readonly onPick?: (id: FaceId | null) => void;
+  /** 指到這些面時，滑鼠游標變成手指。 */
+  readonly clickable?: ReadonlySet<FaceId>;
 }
 
 export function Preview3D(props: Preview3DProps) {
@@ -26,6 +41,13 @@ export function Preview3D(props: Preview3DProps) {
   const camera = useRef<THREE.PerspectiveCamera | undefined>(undefined);
   const controls = useRef<OrbitControls | undefined>(undefined);
   const content = useRef<THREE.Group | undefined>(undefined);
+  /** 每一面對應的網格（正、反兩面各一個），用來換發光顏色。 */
+  const meshes = useRef(new Map<FaceId, THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>[]>());
+  /** 上次對準鏡頭時飛機的大小；大小沒怎麼變就不重設鏡頭（拉滑桿時畫面不會跳走）。 */
+  const framedSize = useRef<number | null>(null);
+  // 事件處理器要讀最新的 props
+  const latest = useRef(props);
+  latest.current = props;
 
   // 建立一次場景、相機、控制器。
   useEffect(() => {
@@ -80,7 +102,53 @@ export function Preview3D(props: Preview3DProps) {
     ro.observe(el);
     resize();
 
+    // 點選：用射線找滑鼠底下「最靠近鏡頭」的紙片，也就是看得到的最外層。
+    const ray = new THREE.Raycaster();
+    const pickAt = (e: PointerEvent): FaceId | null => {
+      const rect = r.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      ray.setFromCamera(ndc, cam);
+      const targets = grp.children.filter((o) => o.userData.faceId !== undefined);
+      const hit = ray.intersectObjects(targets, false)[0];
+      return hit ? (hit.object.userData.faceId as FaceId) : null;
+    };
+    let down: { x: number; y: number } | null = null;
+    let lastHover: FaceId | null = null;
+    const onDown = (e: PointerEvent) => {
+      down = { x: e.clientX, y: e.clientY };
+    };
+    const onUp = (e: PointerEvent) => {
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= CLICK_PX) latest.current.onPick?.(pickAt(e));
+      down = null;
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.buttons !== 0) return; // 正在拖曳轉動
+      const id = pickAt(e);
+      r.domElement.style.cursor = id !== null && latest.current.clickable?.has(id) ? 'pointer' : 'grab';
+      if (id !== lastHover) {
+        lastHover = id;
+        latest.current.onHover?.(id);
+      }
+    };
+    const onLeave = () => {
+      if (lastHover !== null) {
+        lastHover = null;
+        latest.current.onHover?.(null);
+      }
+    };
+    r.domElement.addEventListener('pointerdown', onDown);
+    r.domElement.addEventListener('pointerup', onUp);
+    r.domElement.addEventListener('pointermove', onMove);
+    r.domElement.addEventListener('pointerleave', onLeave);
+
     return () => {
+      r.domElement.removeEventListener('pointerdown', onDown);
+      r.domElement.removeEventListener('pointerup', onUp);
+      r.domElement.removeEventListener('pointermove', onMove);
+      r.domElement.removeEventListener('pointerleave', onLeave);
       cancelAnimationFrame(raf);
       ro.disconnect();
       ctl.dispose();
@@ -110,6 +178,7 @@ export function Preview3D(props: Preview3DProps) {
       });
     }
 
+    meshes.current.clear();
     const box = new THREE.Box3();
     // 每一條邊（用錯開前的位置對齊）：記下用到它的每一片，用來找出「同一層裡並排的兩片」之間的摺痕。
     const edgeMap = new Map<string, { piece: number; side: number }[]>();
@@ -137,8 +206,11 @@ export function Preview3D(props: Preview3DProps) {
         [THREE.BackSide, downColor],
       ] as const) {
         const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color, side }));
-        mesh.userData.faceId = piece.faceId; // 之後用來點選最外層的翼片
+        mesh.userData.faceId = piece.faceId; // 點選最外層的翼片用
         grp.add(mesh);
+        const list = meshes.current.get(piece.faceId) ?? [];
+        list.push(mesh);
+        meshes.current.set(piece.faceId, list);
       }
 
       const base = piece.base.map(m);
@@ -191,10 +263,16 @@ export function Preview3D(props: Preview3DProps) {
     // 迴紋針（灰）
     for (const c of props.clips) grp.add(sphere(m(c.pos), markR * (c.size === 'large' ? 1.3 : 1), 0x808a94));
 
-    // 相機對準中心，從斜前上方看
-    const center = box.getCenter(new THREE.Vector3());
-    ctl.target.copy(center);
-    cam.position.set(center.x + size * 0.7, center.y + size * 0.55, center.z + size * 1.1);
+    // 相機對準中心，從斜前上方看。只在第一次、或飛機大小明顯改變時重設，
+    // 拉滑桿（翼片翹起、上反角…）時保留孩子轉好的角度。
+    const prev = framedSize.current;
+    if (prev === null || Math.abs(size - prev) > 0.25 * prev) {
+      const center = box.getCenter(new THREE.Vector3());
+      ctl.target.copy(center);
+      cam.position.set(center.x + size * 0.7, center.y + size * 0.55, center.z + size * 1.1);
+      framedSize.current = size;
+    }
+    applyGlow(meshes.current, props.hovered, props.selected);
     // near 不要太小：疊在一起的紙只差零點幾 mm，深度緩衝要夠精細才分得出上下層。
     cam.near = size / 30;
     cam.far = size * 30;
@@ -205,7 +283,29 @@ export function Preview3D(props: Preview3DProps) {
     r.render(s, cam);
   }, [props.pieces, props.cg, props.cp, props.clips]);
 
+  // 只換發光顏色，不用重建整架飛機。
+  useEffect(() => {
+    applyGlow(meshes.current, props.hovered, props.selected);
+    const r = renderer.current;
+    if (r && scene.current && camera.current) r.render(scene.current, camera.current);
+  }, [props.hovered, props.selected]);
+
   return <div class="preview3d" ref={mount} />;
+}
+
+function applyGlow(
+  byFace: Map<FaceId, THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>[]>,
+  hovered: ReadonlySet<FaceId> | undefined,
+  selected: ReadonlySet<FaceId> | undefined,
+) {
+  for (const [id, list] of byFace) {
+    const glow = selected?.has(id) ? SELECTED_GLOW : hovered?.has(id) ? HOVER_GLOW : 0x000000;
+    const strength = selected?.has(id) ? 0.45 : 0.35;
+    for (const mesh of list) {
+      mesh.material.emissive.setHex(glow);
+      mesh.material.emissiveIntensity = glow ? strength : 0;
+    }
+  }
 }
 
 function sphere(p: THREE.Vector3, radius: number, color: number): THREE.Mesh {

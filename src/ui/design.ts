@@ -1,4 +1,14 @@
-import { type FaceId, type Line, type PaperState, type Paperclip, bendableFaces, foldedPolygon, vec } from '../core';
+import {
+  type FaceId,
+  type FlapBend,
+  type Line,
+  type PaperState,
+  type Paperclip,
+  bendableFaces,
+  foldedPolygon,
+  resolveFlapBends,
+  vec,
+} from '../core';
 
 /**
  * 「飛機設計」——由「看飛機」設定、「風洞」共用的同一份參數。
@@ -11,21 +21,31 @@ export interface Design {
   readonly tiltDeg: number;
   /** 上反角（度）。 */
   readonly dihedralDeg: number;
-  /** 翼片翹起角（度）：把所有「單鉸鏈的小翼片」掀起來的角度。 */
+  /** 孩子在 3D 裡點選要翹起的翼片（每片各自的角度，左右對稱的那片會一起翹）。 */
+  readonly flaps?: readonly FlapBend[];
+  /**
+   * 舊版：把所有「單鉸鏈的小翼片」用同一個角度（度）一起掀起來。
+   * 只為了讓舊的存檔和實測紀錄還能打開；新的操作一律用 flaps，並把這裡設成 0。
+   */
   readonly flapBendDeg: number;
   /** 迴紋針。 */
   readonly clips: readonly Paperclip[];
 }
 
-export const DEFAULT_DESIGN: Design = { wingFrac: 0.45, tiltDeg: 0, dihedralDeg: 8, flapBendDeg: 0, clips: [] };
+export const DEFAULT_DESIGN: Design = { wingFrac: 0.45, tiltDeg: 0, dihedralDeg: 8, flaps: [], flapBendDeg: 0, clips: [] };
 
 /** 由設計算出要翹起哪些翼片、翹幾度（弧度）。 */
 export function bendsOf(state: PaperState, design: Design): Map<FaceId, number> {
+  if (design.flaps && design.flaps.length > 0) return resolveFlapBends(state, design.flaps);
   const rad = ((design.flapBendDeg || 0) * Math.PI) / 180;
   const m = new Map<FaceId, number>();
   if (rad !== 0) for (const id of bendableFaces(state)) m.set(id, rad);
   return m;
 }
+
+/** 翼片相關的設定有沒有改變（給 useMemo 當相依值）。 */
+export const flapKey = (design: Design): string =>
+  `${design.flapBendDeg}|${(design.flaps ?? []).map((f) => `${f.at.x},${f.at.y},${f.deg}`).join(';')}`;
 
 export interface PlaneMetrics {
   /** 半邊寬（中線到最外側，mm）。 */

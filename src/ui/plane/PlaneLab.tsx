@@ -1,17 +1,23 @@
 import { useMemo, useState } from 'preact/hooks';
 import {
+  type FaceId,
   type PaperState,
   type Paperclip,
   type PaperclipSize,
   type Vec3,
   assemblyMass,
+  bendableFaces,
   buildAssembly,
   displayPieces,
+  flapAnchor,
+  flapIndexOf,
   liftCenter,
+  mirrorFace,
+  resolveFlapBends,
   stability,
   vec3,
 } from '../../core';
-import { type Design, bendsOf, planeMetrics, wingLineOf } from '../design';
+import { type Design, bendsOf, flapKey, planeMetrics, wingLineOf } from '../design';
 import { STABILITY_TEXT } from '../text';
 import { Preview3D } from './Preview3D';
 import { StabilityDiagram } from './StabilityDiagram';
@@ -36,8 +42,54 @@ export function PlaneLab(props: PlaneLabProps) {
 
   const assembly = useMemo(
     () => buildAssembly(state, wingLine, deg2rad(design.dihedralDeg), bendsOf(state, design)),
-    [state, design.wingFrac, design.tiltDeg, design.dihedralDeg, design.flapBendDeg],
+    [state, design.wingFrac, design.tiltDeg, design.dihedralDeg, flapKey(design)],
   );
+
+  // ── 點選翼片 ──
+  const flaps = design.flaps ?? [];
+  const bendable = useMemo(() => new Set(bendableFaces(state)), [state]);
+  const [hoverId, setHoverId] = useState<FaceId | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const sel = selectedIdx !== null && selectedIdx < flaps.length ? selectedIdx : null;
+  /** 這一面和它左右對稱的那一面。 */
+  const pair = (id: FaceId): Set<FaceId> => {
+    const m = mirrorFace(state, id);
+    return new Set(m === null ? [id] : [id, m]);
+  };
+  const hovered = useMemo(
+    () => (hoverId !== null && bendable.has(hoverId) ? pair(hoverId) : new Set<FaceId>()),
+    [hoverId, bendable, state],
+  );
+  const selected = useMemo(
+    () => (sel === null ? new Set<FaceId>() : new Set(resolveFlapBends(state, [{ ...flaps[sel], deg: 1 }]).keys())),
+    [sel, flapKey(design), state],
+  );
+  const say = (text: string) => {
+    setNote(text);
+    window.setTimeout(() => setNote((t) => (t === text ? null : t)), 2500);
+  };
+  const onPick = (id: FaceId | null) => {
+    if (id === null) return setSelectedIdx(null);
+    if (!bendable.has(id)) {
+      setSelectedIdx(null);
+      return say('這片紙兩邊都連著，翹不起來喔，試試會發亮的那些 ✨');
+    }
+    const idx = flapIndexOf(state, flaps, id);
+    if (idx >= 0) return setSelectedIdx(idx);
+    // 新選一片：先翹 30°，馬上看得到效果。改用逐片設定後，舊版「全部一起翹」歸零。
+    patch({ flaps: [...flaps, { at: flapAnchor(state, id), deg: 30 }], flapBendDeg: 0 });
+    setSelectedIdx(flaps.length);
+  };
+  const setFlapDeg = (deg: number) => {
+    if (sel === null) return;
+    patch({ flaps: flaps.map((f, i) => (i === sel ? { ...f, deg } : f)) });
+  };
+  const dropFlap = () => {
+    if (sel === null) return;
+    patch({ flaps: flaps.filter((_, i) => i !== sel) });
+    setSelectedIdx(null);
+  };
   const shown = useMemo(() => displayPieces(state, assembly), [state, assembly]);
   const mass = useMemo(() => assemblyMass(assembly, clips), [assembly, clips]);
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
@@ -66,8 +118,20 @@ export function PlaneLab(props: PlaneLabProps) {
 
       <div class="planelab-main">
         <div class="preview-wrap">
-          <div class="panel-label">用滑鼠拖一拖，轉轉看飛機 ✈️</div>
-          <Preview3D pieces={shown} cg={mass.cg} cp={planform.cp} clips={clips} />
+          <div class="panel-label">
+            {note ?? '用滑鼠拖一拖，轉轉看飛機 ✈️　點一下會發亮的翼片，就能把它翹起來 👆'}
+          </div>
+          <Preview3D
+            pieces={shown}
+            cg={mass.cg}
+            cp={planform.cp}
+            clips={clips}
+            hovered={hovered}
+            selected={selected}
+            clickable={bendable}
+            onHover={setHoverId}
+            onPick={onPick}
+          />
         </div>
         <div class="diagram-wrap">
           <StabilityDiagram
@@ -112,14 +176,28 @@ export function PlaneLab(props: PlaneLabProps) {
           />
         </div>
         <div class="control">
-          <label>翼片翹起 {design.flapBendDeg}°</label>
-          <input
-            type="range"
-            min={0}
-            max={80}
-            value={design.flapBendDeg}
-            onInput={(e) => patch({ flapBendDeg: Number((e.target as HTMLInputElement).value) })}
-          />
+          {sel !== null ? (
+            <>
+              <label>
+                選到的翼片翹起 {flaps[sel].deg}°
+                <button class="chip flap-drop" onClick={dropFlap}>
+                  ↩️ 放下
+                </button>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={80}
+                value={flaps[sel].deg}
+                onInput={(e) => setFlapDeg(Number((e.target as HTMLInputElement).value))}
+              />
+            </>
+          ) : (
+            <>
+              <label>翼片翹起{flaps.length > 0 ? `（已翹起 ${flaps.length} 組）` : ''}</label>
+              <div class="flap-hint">👆 在左邊的飛機上點一片翼片</div>
+            </>
+          )}
         </div>
         <div class="control clip-control">
           <label>迴紋針（{clips.length}／{MAX_CLIPS}）</label>
