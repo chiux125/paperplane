@@ -37,3 +37,20 @@ export function stability(cg: Vec3, cp: Vec3, meanChord: number): Stability {
     margin < STABLE_MIN ? 'pitch-up' : margin > STABLE_MAX ? 'nose-dive' : 'stable';
   return { margin, marginMm, verdict, thresholds: { min: STABLE_MIN, max: STABLE_MAX } };
 }
+
+/** 「推一下」會怎樣：升力中心在重心後面（裕度 > 0）→ 自己回正；在前面（裕度 < 0）→ 越歪越多。 */
+export type PushResult = 'returns' | 'diverges' | 'neutral';
+
+export function pushTest(margin: number): PushResult {
+  if (margin > 0.02) return 'returns';
+  if (margin < -0.02) return 'diverges';
+  return 'neutral';
+}
+
+/**
+ * 被推歪 theta（弧度）後的恢復角加速度（示意用的簡單彈簧模型）。
+ * 和 (−裕度 × theta) 成正比：裕度 > 0 時方向和 theta 相反 → 把飛機轉回去；裕度 < 0 → 越推越歪。
+ */
+export function pitchAccel(margin: number, theta: number, omega: number, spring = 40, damp = 2): number {
+  return -spring * margin * theta - damp * omega;
+}

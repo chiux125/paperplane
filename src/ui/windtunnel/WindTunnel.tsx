@@ -11,6 +11,7 @@ import {
   inWake,
   isStalled,
   liftCenter,
+  pitchAccel,
   plate,
   stability,
   tipVortexAxisV,
@@ -124,9 +125,17 @@ export function WindTunnel(props: WindTunnelProps) {
   const stalled = isStalled(deg2rad(effDeg));
   const nearStall = !stalled && effDeg >= STALL_ANGLE_DEG - 3;
 
+  // 「推一下」測試：推歪後看會不會自己回正。
+  const [pushMsg, setPushMsg] = useState<{ ok: 'returns' | 'diverges' | 'neutral'; text: string } | null>(null);
+  const push = useRef({ active: false, theta: 0, omega: 0, last: 0 });
+  const doPush = () => {
+    push.current = { active: true, theta: (12 * Math.PI) / 180, omega: 0, last: performance.now() };
+    setPushMsg(null);
+  };
+
   // 把會變動的資料放進 ref，讓單一動畫迴圈讀最新值。
-  const live = useRef({ effRad: 0, geom, stalled, tw });
-  live.current = { effRad: deg2rad(effDeg), geom, stalled, tw };
+  const live = useRef({ effRad: 0, geom, stalled, tw, margin: 0 });
+  live.current = { effRad: deg2rad(effDeg), geom, stalled, tw, margin: stab.margin };
 
   // 側視：煙線流過機翼剖面
   useEffect(() => {
@@ -178,7 +187,26 @@ export function WindTunnel(props: WindTunnelProps) {
         ctx.fillRect(0, 0, w, h);
         init();
       }
-      const { effRad: alpha, geom: g } = live.current;
+      // 「推一下」：用簡單彈簧模型推進被推歪的角度，加到攻角上。
+      const ps = push.current;
+      if (ps.active) {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - ps.last) / 1000);
+        ps.last = now;
+        const acc = pitchAccel(live.current.margin, ps.theta, ps.omega);
+        ps.omega += acc * dt;
+        ps.theta += ps.omega * dt;
+        if (Math.abs(ps.theta) > (70 * Math.PI) / 180) {
+          ps.active = false;
+          setPushMsg({ ok: 'diverges', text: '越歪越多，會翻過去 😵' });
+        } else if (Math.abs(ps.theta) < 0.01 && Math.abs(ps.omega) < 0.05) {
+          ps.active = false;
+          ps.theta = 0;
+          setPushMsg({ ok: 'returns', text: '自己轉回來了，穩！👍' });
+        }
+      }
+      const { effRad, geom: g } = live.current;
+      const alpha = effRad + ps.theta;
       const pl = plate(alpha);
 
       ctx.fillStyle = BG_FADE;
@@ -209,6 +237,13 @@ export function WindTunnel(props: WindTunnelProps) {
         ctx.stroke();
       }
       drawSidePlane(ctx, g, alpha, X, Y, geo.s);
+      if (ps.active) {
+        // 機頭附近畫一個箭頭：綠色＝正在把飛機轉回正，紅色＝越推越歪。
+        const noseX = X(pl.le.x);
+        const noseY = Y(pl.le.y);
+        const moment = -live.current.margin * ps.theta; // >0：機頭往上（攻角變大）
+        drawPushArrow(ctx, noseX, noseY, moment > 0 ? -1 : 1, live.current.margin > 0);
+      }
       windLabel(ctx);
       raf = requestAnimationFrame(frame);
     };
@@ -377,6 +412,15 @@ export function WindTunnel(props: WindTunnelProps) {
           )}
         </label>
         <input type="range" min={0} max={25} value={alphaDeg} onInput={(e) => setAlphaDeg(Number((e.target as HTMLInputElement).value))} />
+        <div class="push-row">
+          <button class="chip push-btn" onClick={doPush}>
+            👆 推一下
+          </button>
+          {pushMsg && (
+            <span class={`push-msg ${pushMsg.ok}`}>{pushMsg.text}</span>
+          )}
+          <span class="push-hint">把機頭推高一點，看它會不會自己回正</span>
+        </div>
       </div>
       <div class="tunnel-foot">
         把攻角慢慢調大看什麼時候「亂掉」（失速約 {STALL_ANGLE_DEG}°）· 🔴重心 🔵升力中心 · 到「看飛機」改機翼位置／斜度／迴紋針，這裡會跟著變
@@ -490,6 +534,30 @@ function drawVortexIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   ctx.moveTo(ex, ey);
   ctx.lineTo(ex - ah * Math.cos(tang + 0.5), ey - ah * Math.sin(tang + 0.5));
   ctx.stroke();
+  ctx.restore();
+}
+
+/** 「推一下」時機頭旁邊的箭頭：dir = 螢幕方向（-1 向上、+1 向下）；restoring 決定顏色。 */
+function drawPushArrow(ctx: CanvasRenderingContext2D, x: number, y: number, dir: number, restoring: boolean) {
+  const len = 34;
+  const x0 = x - 22;
+  const y0 = y - dir * 6;
+  const y1 = y0 + dir * len;
+  ctx.save();
+  ctx.strokeStyle = restoring ? '#37c06a' : '#ff5a5a';
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x0, y1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x0, y1 + dir * 2);
+  ctx.lineTo(x0 - 6, y1 - dir * 8);
+  ctx.lineTo(x0 + 6, y1 - dir * 8);
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 

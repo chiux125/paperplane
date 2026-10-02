@@ -334,6 +334,44 @@ h1 {
   text-align: center;
 }
 
+.push-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.push-btn {
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 18px;
+  background: #e5f1fc;
+  box-shadow: 0 2px 0 #c9d6e1;
+}
+
+.push-msg {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.push-msg.returns {
+  color: #1f7a4d;
+}
+
+.push-msg.diverges {
+  color: #b23636;
+}
+
+.push-msg.neutral {
+  color: #a35a00;
+}
+
+.push-hint {
+  font-size: 13px;
+  color: #7a6f60;
+}
+
 /* ── 射射看／實測紀錄（階段 5） ───────────────────── */
 .flightlog {
   flex: 1;

@@ -12,6 +12,8 @@ import {
   paperMass,
   rotateAxis,
   simpleFold,
+  pitchAccel,
+  pushTest,
   stability,
   vec3,
 } from '../src/core';
@@ -116,5 +118,18 @@ describe('靜態穩定度門檻', () => {
   it('剛好在門檻上：5% 與 30% 都算穩', () => {
     expect(stability(vec3(0, 105, 0), vec3(0, 100, 0), 100).verdict).toBe('stable');
     expect(stability(vec3(0, 130, 0), vec3(0, 100, 0), 100).verdict).toBe('stable');
+  });
+});
+
+describe('推一下測試', () => {
+  it('裕度 > 0 → 自己回正；< 0 → 越歪越多；≈ 0 → 不確定', () => {
+    expect(pushTest(0.15)).toBe('returns');
+    expect(pushTest(-0.1)).toBe('diverges');
+    expect(pushTest(0)).toBe('neutral');
+  });
+
+  it('恢復角加速度：穩定時方向和被推的方向相反，不穩時相同', () => {
+    expect(pitchAccel(0.15, 0.2, 0)).toBeLessThan(0); // 往 +方向推、穩定 → 把它往回（負）
+    expect(pitchAccel(-0.15, 0.2, 0)).toBeGreaterThan(0); // 不穩 → 繼續往 +（越歪越多）
   });
 });
