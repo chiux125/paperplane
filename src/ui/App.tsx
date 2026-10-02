@@ -15,22 +15,26 @@ import {
   createHistory,
   createSheet,
   current,
+  doneOps,
   flipOutcome,
   isHalved,
   paperMass,
   pushApplied,
   redo,
+  replay,
   undo,
   vec,
 } from '../core';
 import { Editor, type PhaseKind, type Proposal, type Tool } from './editor/Editor';
 import { ReversePicker } from './editor/ReversePicker';
 import { type Design, DEFAULT_DESIGN } from './design';
+import { FlightLog } from './log/FlightLog';
+import type { LogRecord } from './log/store';
 import { PlaneLab } from './plane/PlaneLab';
 import { WindTunnel } from './windtunnel/WindTunnel';
 import { ERROR_TEXT, HINT, TOOL_LABEL } from './text';
 
-type Mode = 'fold' | 'plane' | 'tunnel';
+type Mode = 'fold' | 'plane' | 'tunnel' | 'log';
 
 const FOLD_MS = 700;
 const CREASE_MS = 900;
@@ -54,7 +58,7 @@ export function App() {
   const busy = animation !== null;
   const halved = isHalved(state);
   // 還沒對摺就不能看飛機／風洞；若狀態退回到沒對摺，自動當作摺紙模式。
-  const activeMode: Mode = (mode === 'plane' || mode === 'tunnel') && halved ? mode : 'fold';
+  const activeMode: Mode = (mode === 'plane' || mode === 'tunnel' || mode === 'log') && halved ? mode : 'fold';
 
   const say = (text: string) => {
     setMessage(text);
@@ -122,6 +126,17 @@ export function App() {
   };
 
   const flipOver = () => play({ op: { kind: 'flip' }, outcome: flipOutcome(state) });
+
+  /** 載入一筆紀錄的設計：從白紙重播摺紙步驟，並套回機翼／迴紋針設定。 */
+  const loadRecord = (rec: LogRecord) => {
+    const r = replay(createSheet(), rec.ops);
+    if (!r.ok) return say('這個紀錄載入失敗了');
+    setPending(null);
+    setReverseOpts(null);
+    setHistory(r.value);
+    setDesign(rec.design);
+    setMode('plane');
+  };
 
   /** 反摺：畫線並點了一側後，算出合法選項讓孩子挑。 */
   const onReverse = (line: Line, pick: Vec2) => {
@@ -230,12 +245,22 @@ export function App() {
         >
           💨 風洞{halved ? '' : '（先對摺）'}
         </button>
+        <button
+          class={`mode ${activeMode === 'log' ? 'selected' : ''}`}
+          disabled={busy || !halved}
+          title={halved ? '' : '先摺好飛機才能記錄喔'}
+          onClick={() => (halved ? setMode('log') : say('先摺好飛機，再來記錄 📏'))}
+        >
+          📏 射射看{halved ? '' : '（先對摺）'}
+        </button>
       </nav>
 
       {activeMode === 'plane' ? (
         <PlaneLab state={state} design={design} onChange={setDesign} />
       ) : activeMode === 'tunnel' ? (
         <WindTunnel state={state} design={design} />
+      ) : activeMode === 'log' ? (
+        <FlightLog state={state} design={design} ops={doneOps(history)} onLoad={loadRecord} />
       ) : (
       <div class="workspace">
         <nav class="tools">

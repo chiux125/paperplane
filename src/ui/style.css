@@ -334,6 +334,168 @@ h1 {
   text-align: center;
 }
 
+/* ── 射射看／實測紀錄（階段 5） ───────────────────── */
+.flightlog {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.log-top {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.predict-card {
+  flex: 1;
+  min-width: 220px;
+  background: #e5f1fc;
+  border-radius: 16px;
+  padding: 14px 18px;
+}
+
+.predict-title {
+  font-size: 15px;
+  color: #4a5b6b;
+}
+
+.predict-behavior {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 26px;
+  font-weight: bold;
+  color: #2f6fb3;
+  margin: 4px 0;
+}
+
+.predict-behavior .big-emoji {
+  font-size: 34px;
+}
+
+.predict-nums {
+  font-size: 14px;
+  color: #4a5b6b;
+}
+
+.predict-note {
+  font-size: 12px;
+  color: #7a6f60;
+  margin-top: 4px;
+}
+
+.log-form {
+  flex: 2;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: white;
+  border-radius: 16px;
+  padding: 14px 18px;
+  box-shadow: 0 2px 0 #c9d6e1;
+}
+
+.form-hint {
+  font-size: 16px;
+  color: #a35a00;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  flex-wrap: wrap;
+}
+
+.form-row input[type='number'] {
+  width: 110px;
+  font-size: 20px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 2px solid #c9d6e1;
+}
+
+.form-row.behaviors {
+  gap: 8px;
+}
+
+.save-btn {
+  align-self: flex-start;
+  min-width: 140px;
+  min-height: 50px;
+  font-size: 20px;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-empty {
+  color: #7a6f60;
+  text-align: center;
+  padding: 20px;
+}
+
+.log-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: white;
+  border-radius: 14px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 0 #c9d6e1;
+}
+
+.row-dist {
+  font-size: 30px;
+  font-weight: bold;
+  color: #2b9a66;
+  min-width: 88px;
+  text-align: right;
+}
+
+.row-dist span {
+  font-size: 15px;
+  margin-left: 2px;
+}
+
+.row-mid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.row-behaviors {
+  display: flex;
+  gap: 14px;
+  font-size: 17px;
+}
+
+.row-vs {
+  color: #5b7c99;
+  font-size: 15px;
+}
+
+.row-design {
+  font-size: 13px;
+  color: #7a6f60;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .tools {
   display: flex;
   flex-direction: column;

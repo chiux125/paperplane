@@ -1,5 +1,15 @@
-import type { FoldError, ReverseStyle, StabilityVerdict } from '../core';
+import type { FlightBehavior, FoldError, ReverseStyle, StabilityVerdict } from '../core';
 import type { PhaseKind, Tool } from './editor/Editor';
+
+/** 飛行行為的孩子用說法。 */
+export const BEHAVIOR_LABEL: Record<FlightBehavior, { icon: string; text: string }> = {
+  glide: { icon: '✈️', text: '平穩滑翔' },
+  wave: { icon: '〰️', text: '上下波浪' },
+  'pitch-up': { icon: '🙃', text: '仰頭失速' },
+  'nose-dive': { icon: '😵', text: '一出手栽頭' },
+  turn: { icon: '↩️', text: '往一邊轉' },
+  other: { icon: '❓', text: '其他' },
+};
 
 /** 反摺選項的孩子用說法（不講內翻／外翻術語）。 */
 export const REVERSE_LABEL: Record<ReverseStyle, { icon: string; text: string }> = {

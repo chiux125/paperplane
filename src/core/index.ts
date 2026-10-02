@@ -26,4 +26,5 @@ export * from './physics/windtunnel';
 export * from './physics/topflow';
 export * from './validate/validate';
 export * from './history';
+export * from './log/flightLog';
 export * from './result';
