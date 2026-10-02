@@ -5,6 +5,7 @@ import {
   type PaperState,
   type Paperclip,
   bendableFaces,
+  flapFor,
   foldedPolygon,
   resolveFlapBends,
   vec,
@@ -39,7 +40,8 @@ export function bendsOf(state: PaperState, design: Design): Map<FaceId, number> 
   if (design.flaps && design.flaps.length > 0) return resolveFlapBends(state, design.flaps);
   const rad = ((design.flapBendDeg || 0) * Math.PI) / 180;
   const m = new Map<FaceId, number>();
-  if (rad !== 0) for (const id of bendableFaces(state)) m.set(id, rad);
+  // 舊版只翹「只有一條摺痕連著的單一面」：也就是翼片只有它自己的那些面
+  if (rad !== 0) for (const id of bendableFaces(state)) if (flapFor(state, id)!.faces.length === 1) m.set(id, rad);
   return m;
 }
 

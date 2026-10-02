@@ -11,9 +11,9 @@ import {
   displayPieces,
   flapAnchor,
   flapIndexOf,
+  flapFacesOf,
   flapPartners,
   liftCenter,
-  resolveFlapBends,
   stability,
   vec3,
 } from '../../core';
@@ -58,7 +58,7 @@ export function PlaneLab(props: PlaneLabProps) {
     [hoverId, state],
   );
   const selected = useMemo(
-    () => (sel === null ? new Set<FaceId>() : new Set(resolveFlapBends(state, [{ ...flaps[sel], deg: 1 }]).keys())),
+    () => new Set(sel === null ? [] : flapFacesOf(state, flaps[sel])),
     [sel, flapKey(design), state],
   );
   const say = (text: string) => {

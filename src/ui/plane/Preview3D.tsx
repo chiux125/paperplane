@@ -7,8 +7,9 @@ import { type DisplayPiece, type FaceId, PAPER_THICKNESS, type Paperclip, type V
 const FRONT = 0xfdfbf5;
 const BACK = 0xf6c667;
 const EDGE = 0x6b5b45;
-// 翼片點選：滑鼠指著變橘、已選變藍（直接換顏色；白紙已經很亮，用發光看不出來）。
-const HOVER_TINT = new THREE.Color(0xff8c1a);
+// 翼片點選：滑鼠指著變綠、已選變藍（直接換顏色；白紙已經很亮，用發光看不出來）。
+// 用綠色是為了和紙的白色正面、橘色背面都分得開。
+const HOVER_TINT = new THREE.Color(0x22b45a);
 const SELECTED_TINT = new THREE.Color(0x3b82e0);
 /** 按下到放開移動不超過這麼多 px 才算「點一下」，超過就是在轉飛機。 */
 const CLICK_PX = 5;

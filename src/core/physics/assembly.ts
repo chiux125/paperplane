@@ -2,7 +2,7 @@ import { apply, det } from '../geom/iso';
 import { type Line, lineThrough, signedDist } from '../geom/line';
 import { hingeAngle } from '../engine/angle';
 import { area, centroid, splitByDistances } from '../geom/polygon';
-import { type Vec2, vec } from '../geom/vec';
+import { type Vec2, add as add2, scale as scale2, vec } from '../geom/vec';
 import { type Vec3, add3, normalize3, rotateAxis, sub3, vec3 } from '../geom/vec3';
 import { foldedPolygon, getFace } from '../model/face';
 import type { FaceId, Hinge, PaperState } from '../model/types';
@@ -75,88 +75,149 @@ const MIN_PIECE = 1e-3;
 /** 把摺好後的 2D 點嵌進「機身垂直」的基準 3D 位置：x→z（往外變高），y 不變，放在 X = 0 平面。 */
 const embed = (p: Vec2): Vec3 => vec3(0, p.y, p.x);
 
-/** 一片可以翹起的翼片：可能由好幾個面組成（中間只隔著攤平的摺痕），繞同一條摺線轉。 */
+/**
+ * 一片可以翹起的翼片：從孩子點的那一面出發，沿一條摺線（轉軸）掀起來時會跟著一起動的所有紙。
+ * 掛在它上面的小翼片（例如反摺上來的尖角）也算在裡面，會被一起帶起來。
+ */
 export interface FlapGroup {
-  /** 組成這片翼片的面（由小到大）。 */
+  /** 點的那一面（決定了這片翼片）。 */
+  readonly root: FaceId;
+  /** 會跟著一起動的面（由小到大）。 */
   readonly faces: readonly FaceId[];
-  /** 轉軸：翼片和其他紙相連的那條摺線（摺好後的 2D 座標）。 */
+  /** 轉軸上的兩點（摺好後的 2D 座標）。 */
   readonly axis: readonly [Vec2, Vec2];
-  /** 翼片的形心（摺好後的 2D 座標），用來決定往哪個方向翹是「往上」。 */
-  readonly centroid: Vec2;
+  /** 這片翼片的紙面積（mm²）。 */
+  readonly area: number;
 }
 
 /** 比這還大的一塊（佔整張紙的比例）不算翼片，例如對摺後的整個半邊。 */
 const MAX_FLAP_FRACTION = 0.2;
+/** 判斷「摺痕在轉軸上」的距離容忍值（mm）。 */
+const ON_AXIS = 1e-3;
 
-/**
- * 找出所有可以「翹起」的翼片，回傳「面 → 它所屬的翼片」。
- * - 攤平的摺痕（0°，例如「留摺痕」或鏡像摺順手多切的一刀）不算斷開：用它相連的面算同一片。
- * - 這一片和其他紙之間真正摺起來的摺痕，必須全部落在同一條直線上，才能整片繞那條線掀起來而不扯到別處。
- * - 太大塊的不算翼片。
- */
-export function flapGroups(state: PaperState): Map<FaceId, FlapGroup> {
-  const parent = new Map<FaceId, FaceId>([...state.faces.keys()].map((id) => [id, id]));
-  const find = (x: FaceId): FaceId => {
-    while (parent.get(x) !== x) x = parent.get(x)!;
-    return x;
-  };
-  const angles = new Map<Hinge, number | null>();
-  for (const h of state.hinges) {
-    const a = hingeAngle(state, h);
-    angles.set(h, a);
-    if (a === 0) parent.set(find(h.faces[0]), find(h.faces[1]));
-  }
-  const members = new Map<FaceId, FaceId[]>();
-  for (const id of state.faces.keys()) {
-    const r = find(id);
-    (members.get(r) ?? members.set(r, []).get(r)!).push(id);
-  }
-
-  const sheetArea = state.sheet.width * state.sheet.height;
-  const out = new Map<FaceId, FlapGroup>();
-  for (const [root, ids] of members) {
-    let total = 0;
-    let cx = 0;
-    let cy = 0;
-    for (const id of ids) {
-      const f = getFace(state, id);
-      const a = area(f.cp);
-      const c = centroid(foldedPolygon(f));
-      total += a;
-      cx += a * c.x;
-      cy += a * c.y;
-    }
-    if (total > MAX_FLAP_FRACTION * sheetArea) continue;
-
-    // 對外的摺痕（另一面不在這一片裡）
-    const external = state.hinges.filter((h) => (find(h.faces[0]) === root) !== (find(h.faces[1]) === root));
-    if (external.length === 0 || external.some((h) => angles.get(h) === null)) continue;
-    const segOf = (h: Hinge): [Vec2, Vec2] => {
-      const f = getFace(state, h.faces[0]);
-      return [apply(f.xf, h.cpSeg[0]), apply(f.xf, h.cpSeg[1])];
-    };
-    const axis = segOf(external[0]);
-    const axisLine = lineThrough(axis[0], axis[1]);
-    if (!axisLine) continue;
-    const collinear = external.every((h) => segOf(h).every((p) => Math.abs(signedDist(axisLine, p)) < 1e-3));
-    if (!collinear) continue;
-
-    const group: FlapGroup = { faces: [...ids].sort((a, b) => a - b), axis, centroid: vec(cx / total, cy / total) };
-    for (const id of ids) out.set(id, group);
-  }
-  return out;
+interface HingeInfo {
+  readonly hinge: Hinge;
+  readonly seg: readonly [Vec2, Vec2];
+  /** 攤平的摺痕（0°）：只是壓過的線，或鏡像摺順手多切的一刀。 */
+  readonly flat: boolean;
 }
 
-/** 可以翹起的面（屬於某一片翼片的所有面）。 */
+/** 每一面接到的摺痕（含摺好後的位置）。撕裂（角度算不出來）的摺痕略過。 */
+function hingeIndex(state: PaperState): Map<FaceId, HingeInfo[]> {
+  const m = new Map<FaceId, HingeInfo[]>([...state.faces.keys()].map((id) => [id, []]));
+  for (const h of state.hinges) {
+    const angle = hingeAngle(state, h);
+    if (angle === null) continue;
+    const f = getFace(state, h.faces[0]);
+    const info: HingeInfo = { hinge: h, seg: [apply(f.xf, h.cpSeg[0]), apply(f.xf, h.cpSeg[1])], flat: angle === 0 };
+    for (const id of h.faces) m.get(id)?.push(info);
+  }
+  return m;
+}
+
+/** 這一面在原紙的左半還是右半（中線上算 0）。 */
+const halfOf = (state: PaperState, id: FaceId): number => {
+  const x = centroid(getFace(state, id).cp).x;
+  return Math.abs(x) < 1e-6 ? 0 : Math.sign(x);
+};
+
+const flapCache = new WeakMap<PaperState, Map<FaceId, FlapGroup | null>>();
+
+/**
+ * 點了 id 這一面，要翹起的是哪一片翼片？自動找轉軸：
+ * - 這一面邊上的每一條摺線都當作候選轉軸。
+ * - 從這一面出發，不跨過那條轉軸線，能連到的紙全部一起動（掛在上面的小翼片也會被帶起來）。
+ * - 這群紙和其他紙只靠這條轉軸線相連（兩個以上的支點都在同一條線上），才掀得起來而不會撕破。
+ * - 太大塊的（例如整個半邊）不算；跨到原紙另一半的也不算（3D 裡左右兩半各往一邊展開，不能整片一起翹）。
+ * 有好幾條轉軸都可以時，選會動的紙最少的那條——最像孩子想翹的那一片。
+ * 優先用真正摺過的摺線當轉軸；都不行才考慮攤平的摺痕（例如孩子「留摺痕」壓的那條線）。都不行就回傳 null。
+ */
+export function flapFor(state: PaperState, id: FaceId): FlapGroup | null {
+  let cache = flapCache.get(state);
+  if (!cache) flapCache.set(state, (cache = new Map()));
+  if (cache.has(id)) return cache.get(id)!;
+
+  const index = hingeIndex(state);
+  // 候選轉軸：和這一面「用攤平摺痕連成一整塊」的那些面上，真正摺過的摺線。
+  // （點到被多切出來的小碎片時，才會找到整片尖角真正的摺線，而不是沿那條假摺痕把碎片自己掀起來。）
+  const piece = new Set<FaceId>([id]);
+  const stack = [id];
+  while (stack.length > 0) {
+    for (const h of index.get(stack.pop()!) ?? []) {
+      if (!h.flat) continue;
+      for (const o of h.hinge.faces) if (!piece.has(o)) (piece.add(o), stack.push(o));
+    }
+  }
+  const folded = [...piece].flatMap((fid) => (index.get(fid) ?? []).filter((h) => !h.flat));
+  const flat = (index.get(id) ?? []).filter((h) => h.flat);
+  const best = bestFlap(state, id, index, folded) ?? bestFlap(state, id, index, flat);
+  cache.set(id, best);
+  return best;
+}
+
+/** 在這些候選轉軸裡，找出合法而且會動的紙最少的那一片。 */
+function bestFlap(
+  state: PaperState,
+  id: FaceId,
+  index: Map<FaceId, HingeInfo[]>,
+  candidates: readonly HingeInfo[],
+): FlapGroup | null {
+  const limit = MAX_FLAP_FRACTION * state.sheet.width * state.sheet.height;
+  const areaOf = (fid: FaceId) => area(getFace(state, fid).cp);
+  const side = halfOf(state, id);
+  let best: FlapGroup | null = null;
+
+  const tried: Line[] = [];
+  for (const cand of candidates) {
+    const axisLine = lineThrough(cand.seg[0], cand.seg[1]);
+    if (!axisLine) continue;
+    const onAxis = (h: HingeInfo) => h.seg.every((p) => Math.abs(signedDist(axisLine, p)) < ON_AXIS);
+    // 同一條直線上的摺痕只試一次
+    if (tried.some((l) => cand.seg.every((p) => Math.abs(signedDist(l, p)) < ON_AXIS))) continue;
+    tried.push(axisLine);
+
+    // 從點的那一面出發，不跨過轉軸線，看能連到哪些紙
+    const group = new Set<FaceId>([id]);
+    const queue = [id];
+    let total = areaOf(id);
+    while (queue.length > 0 && total <= limit) {
+      for (const h of index.get(queue.pop()!) ?? []) {
+        if (onAxis(h)) continue;
+        for (const other of h.hinge.faces) {
+          if (group.has(other)) continue;
+          group.add(other);
+          queue.push(other);
+          total += areaOf(other);
+        }
+      }
+    }
+    if (total > limit || (best && total >= best.area)) continue;
+    if (side !== 0 && [...group].some((fid) => halfOf(state, fid) === -side)) continue;
+    // 必須還連著別的紙（在轉軸上），不然是飄在空中的一片
+    const attached = [...group].some((fid) =>
+      (index.get(fid) ?? []).some((h) => onAxis(h) && h.hinge.faces.some((o) => !group.has(o))),
+    );
+    if (!attached) continue;
+    best = {
+      root: id,
+      faces: [...group].sort((a, b) => a - b),
+      axis: [axisLine.p, add2(axisLine.p, scale2(axisLine.d, 10))],
+      area: total,
+    };
+  }
+  return best;
+}
+
+/** 點了會翹起來的面（至少找得到一條可以當轉軸的摺線）。 */
 export function bendableFaces(state: PaperState): FaceId[] {
-  return [...flapGroups(state).keys()].sort((a, b) => a - b);
+  return [...state.faces.keys()].filter((id) => flapFor(state, id) !== null).sort((a, b) => a - b);
 }
 
 /**
  * 從摺好的狀態組裝 3D 飛機。
  * @param wingLine 機翼摺線（摺好後的 2D 座標，通常和中線平行）。
  * @param dihedral 上反角（弧度）。0 = 機翼水平，>0 = 翼尖往上翹。
- * @param bends 可選：某些翼片要「翹起」的角度（弧度），key 是面 id。只有屬於某片翼片（flapGroups）的面會被翹起。
+ * @param bends 可選：要「翹起」的翼片與角度（弧度）。key 是孩子點的那一面，翼片由 flapFor 決定（會連同掛在上面的紙一起翹）。
  */
 export function buildAssembly(
   state: PaperState,
@@ -188,7 +249,14 @@ export function buildAssembly(
   const chordDir = rotateAxis(vec3(0, 1, 0), axis, theta);
   const wingIncidence = Math.atan2(chordDir.z, chordDir.y);
 
-  const groups = bends && bends.size > 0 ? flapGroups(state) : null;
+  // 要翹起的翼片：key 是孩子點的那一面，翼片是 flapFor 找出來的那一群。
+  // 一面可能同時在好幾片裡（例如尖角又掛在整片翼片上）：先轉小的、再轉大的，大的會把小的一起帶走。
+  const flaps: { group: FlapGroup; angle: number }[] = [];
+  for (const [root, angle] of bends ?? []) {
+    const group = angle ? flapFor(state, root) : null;
+    if (group) flaps.push({ group, angle });
+  }
+  flaps.sort((a, b) => a.group.area - b.group.area);
   const pieces: AssemblyPiece[] = [];
   const emit = (faceId: FaceId, region: Region, frontUp: boolean, sub: readonly Vec2[]) => {
     const a = area(sub);
@@ -201,18 +269,17 @@ export function buildAssembly(
     let up = vec3(-sx, 0, 0);
     if (region === 'wing') up = rotateAxis(up, axis, theta);
 
-    // 翼片翹起：整片翼片繞它和其他紙相連的那條摺線轉 bend，讓自由端往上掀。
-    const bend = bends?.get(faceId);
-    const group = groups?.get(faceId);
-    const isBent = !!bend && !!group;
-    if (isBent && bend && group) {
+    // 翼片翹起：這一面所在的每一片翼片，依序繞各自的轉軸轉，讓自由端往上掀。
+    let isBent = false;
+    for (const { group, angle } of flaps) {
+      if (!group.faces.includes(faceId)) continue;
+      isBent = true;
       const aPt = place(nx(group.axis[0]));
       const bPt = place(nx(group.axis[1]));
       const ax = normalize3(sub3(bPt, aPt));
-      // 選讓自由端往上(+z)的旋轉方向；整片用同一個判斷，翼片的每一塊才會一起往同一邊翹
-      const gc = place(nx(group.centroid));
-      let ang = bend;
-      if (add3(aPt, rotateAxis(sub3(gc, aPt), ax, ang)).z < gc.z) ang = -bend;
+      // 選讓自由端往上(+z)的旋轉方向（同一片翼片的紙都在轉軸同一側，判斷結果一致）
+      let ang = angle;
+      if (add3(aPt, rotateAxis(sub3(c, aPt), ax, ang)).z < c.z) ang = -angle;
       const rot = (v: Vec3) => add3(aPt, rotateAxis(sub3(v, aPt), ax, ang));
       poly3d = poly3d.map(rot);
       c = rot(c);
