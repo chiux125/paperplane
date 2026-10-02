@@ -136,4 +136,16 @@ describe('翼片對煙線的影響（俯視）', () => {
     expect(topFlapWakeAt(wakes, w.u0 - 0.5, w.vC)).toBe(0); // 翼片前面
     expect(topFlapWakeAt(wakes, w.u0 + 0.1, w.vC + 5)).toBe(0); // 遠遠的旁邊
   });
+
+  it('尾流長度有上限、跟著翼片走，不會無限延伸蓋住整個機翼', () => {
+    const asm = asmWith(45);
+    const wakes = topFlapWakes(asm, topWing(asm).rootChord);
+    for (const w of wakes) {
+      expect(w.len).toBeGreaterThan(0);
+      expect(w.len).toBeLessThanOrEqual(1.5);
+      // 單看這條尾流：超過它的長度之後就結束（不會一路拖到機尾蓋住整個機翼）
+      expect(topFlapWakeAt([w], w.u0 + w.len + 0.01, w.vC)).toBe(0);
+      expect(topFlapWakeAt([w], w.u0 + w.len * 0.5, w.vC)).toBeGreaterThan(0);
+    }
+  });
 });

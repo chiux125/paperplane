@@ -302,12 +302,32 @@ export function buildAssembly(
     });
   };
 
+  // 每一片要翹起的翼片，整片放進同一個基準框（機身或機翼），不被機翼摺線切成兩段。
+  // 不然跨過摺線的翼片會一段立在機身、一段展在機翼，各繞各的軸轉而裂開。
+  // 整片放哪一側：用面積加權看它主要落在機翼摺線的哪一邊。巢狀時外層（較大片）決定朝向。
+  const flapRegionOf = new Map<FaceId, Region>();
+  for (const { group } of flaps) {
+    let signed = 0;
+    for (const fid of group.faces) {
+      const poly = foldedPolygon(getFace(state, fid)).map(nx);
+      signed += area(poly) * signedDist(line, centroid(poly));
+    }
+    const region: Region = signed >= 0 === fuselageOnLeft ? 'fuselage' : 'wing';
+    for (const fid of group.faces) flapRegionOf.set(fid, region);
+  }
+
   for (const f of state.faces.values()) {
+    const frontUp = det(f.xf) > 0;
+    // 翹起的翼片：整片不切，放在上面算好的那個框裡。
+    const whole = flapRegionOf.get(f.id);
+    if (whole) {
+      emit(f.id, whole, frontUp, foldedPolygon(f).map(nx));
+      continue;
+    }
     const poly = foldedPolygon(f).map(nx);
     const dists = poly.map((p) => signedDist(line, p));
     const split = splitByDistances(poly, dists);
     const [fusePoly, wingPoly] = fuselageOnLeft ? [split.left, split.right] : [split.right, split.left];
-    const frontUp = det(f.xf) > 0;
     if (fusePoly) emit(f.id, 'fuselage', frontUp, fusePoly);
     if (wingPoly) emit(f.id, 'wing', frontUp, wingPoly);
   }

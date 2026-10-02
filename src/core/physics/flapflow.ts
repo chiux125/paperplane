@@ -15,16 +15,22 @@ import type { Assembly, AssemblyPiece } from './assembly';
 
 /** 前翼渦漩強度比例。 */
 const FLAP_GAMMA = 2.2;
-/** 尾流長度（側視，翼弦比例）。 */
-const SIDE_WAKE_LEN = 1.2;
-/** 尾流往下游變厚的斜率（側視）。 */
-const SIDE_WAKE_GROW = 0.35;
-/** 尾流長度（俯視，翼根弦比例）。 */
-const TOP_WAKE_LEN = 1.4;
-/** 尾流往下游變寬的比例（俯視）。 */
-const TOP_WAKE_GROW = 0.6;
+/** 尾流長度 = 翼片本身的長度 × 這個倍率：翼片越小尾流越短、越大越長，大致成比例。 */
+const WAKE_LEN_K = 1.1;
+/** 側視尾流長度的上下限（翼弦比例）：有個下限才看得到，有上限大翼片也不會無限長。 */
+const SIDE_WAKE_MIN = 0.35;
+const SIDE_WAKE_MAX = 1.2;
+/** 尾流往下游變厚的斜率（側視）：放小，才不會越拖越寬蓋住整個機翼。 */
+const SIDE_WAKE_GROW = 0.18;
+/** 俯視尾流長度的上下限（翼根弦比例）。 */
+const TOP_WAKE_MIN = 0.45;
+const TOP_WAKE_MAX = 1.5;
+/** 尾流往下游變寬的比例（俯視）：放小，寬度大致跟著翼片本身，不會蓋滿整個機翼。 */
+const TOP_WAKE_GROW = 0.25;
 /** 尾流裡速度最多慢到剩多少。 */
 const WAKE_SLOWDOWN = 0.75;
+
+const clampLen = (len: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, WAKE_LEN_K * len));
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
@@ -46,6 +52,8 @@ export interface TopFlapWake {
   readonly vC: number;
   /** 起點處的半寬。 */
   readonly halfW: number;
+  /** 尾流長度（翼根弦比例），跟著翼片本身的長度。 */
+  readonly len: number;
   /** 0~1。 */
   readonly strength: number;
 }
@@ -128,14 +136,15 @@ export function flapFlowAt(flaps: readonly SideFlap[], v: Vec2, p: Vec2): { v: V
     // 前翼升力：渦漩放在板子中間（負號 = 升力朝上，和主翼一致）
     const mid = scale(add(f.base, f.tip), 0.5);
     out = add(out, vortex(-FLAP_GAMMA * f.lift, mid, Math.max(0.05, len / 2), p));
-    // 尾流：從板子最下游那一側開始往後拖，高度在板子根部和自由端之間，往下游慢慢變厚
+    // 尾流：從板子最下游那一側開始往後拖，長度跟著翼片大小、高度在板子根部和自由端之間，往下游慢慢變厚
+    const wl = clampLen(len, SIDE_WAKE_MIN, SIDE_WAKE_MAX);
     const x0 = Math.max(f.base.x, f.tip.x);
     const dx = p.x - x0;
-    if (dx < 0 || dx > SIDE_WAKE_LEN) continue;
+    if (dx < 0 || dx > wl) continue;
     const yLow = Math.min(f.base.y, f.tip.y) - 0.02;
     const yHigh = Math.max(f.base.y, f.tip.y) + SIDE_WAKE_GROW * dx;
     if (p.y < yLow || p.y > yHigh) continue;
-    wake = Math.max(wake, wakeStrength(f.drag) * (1 - dx / SIDE_WAKE_LEN));
+    wake = Math.max(wake, wakeStrength(f.drag) * (1 - dx / wl));
   }
   if (wake > 0) out = scale(out, 1 - WAKE_SLOWDOWN * wake);
   return { v: out, wake };
@@ -155,15 +164,24 @@ export function topFlapWakes(assembly: Assembly, rootChord: number): TopFlapWake
   for (const p of assembly.pieces) {
     if (!p.bent) continue;
     let uMax = -Infinity;
+    let uMin = Infinity;
     let vMin = Infinity;
     let vMax = -Infinity;
     for (const q of p.poly) {
-      uMax = Math.max(uMax, (yLE - q.y) / rc);
+      const u = (yLE - q.y) / rc;
+      uMax = Math.max(uMax, u);
+      uMin = Math.min(uMin, u);
       vMin = Math.min(vMin, q.x / rc);
       vMax = Math.max(vMax, q.x / rc);
     }
     const drag = (p.area / base) * Math.sin(tiltOf(p)) ** 2;
-    out.push({ u0: uMax, vC: (vMin + vMax) / 2, halfW: Math.max(0.02, (vMax - vMin) / 2), strength: wakeStrength(drag) });
+    out.push({
+      u0: uMax,
+      vC: (vMin + vMax) / 2,
+      halfW: Math.max(0.02, (vMax - vMin) / 2),
+      len: clampLen(uMax - uMin, TOP_WAKE_MIN, TOP_WAKE_MAX),
+      strength: wakeStrength(drag),
+    });
   }
   return out;
 }
@@ -173,10 +191,10 @@ export function topFlapWakeAt(wakes: readonly TopFlapWake[], u: number, v: numbe
   let s = 0;
   for (const w of wakes) {
     const du = u - w.u0;
-    if (du < 0 || du > TOP_WAKE_LEN) continue;
+    if (du < 0 || du > w.len) continue;
     const half = w.halfW * (1 + TOP_WAKE_GROW * du) + 0.03;
     if (Math.abs(v - w.vC) > half) continue;
-    s = Math.max(s, w.strength * (1 - du / TOP_WAKE_LEN));
+    s = Math.max(s, w.strength * (1 - du / w.len));
   }
   return s;
 }
