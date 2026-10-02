@@ -1,4 +1,4 @@
-import { type Line, type PaperState, type Paperclip, foldedPolygon, vec } from '../core';
+import { type FaceId, type Line, type PaperState, type Paperclip, bendableFaces, foldedPolygon, vec } from '../core';
 
 /**
  * 「飛機設計」——由「看飛機」設定、「風洞」共用的同一份參數。
@@ -11,11 +11,21 @@ export interface Design {
   readonly tiltDeg: number;
   /** 上反角（度）。 */
   readonly dihedralDeg: number;
+  /** 翼片翹起角（度）：把所有「單鉸鏈的小翼片」掀起來的角度。 */
+  readonly flapBendDeg: number;
   /** 迴紋針。 */
   readonly clips: readonly Paperclip[];
 }
 
-export const DEFAULT_DESIGN: Design = { wingFrac: 0.45, tiltDeg: 0, dihedralDeg: 8, clips: [] };
+export const DEFAULT_DESIGN: Design = { wingFrac: 0.45, tiltDeg: 0, dihedralDeg: 8, flapBendDeg: 0, clips: [] };
+
+/** 由設計算出要翹起哪些翼片、翹幾度（弧度）。 */
+export function bendsOf(state: PaperState, design: Design): Map<FaceId, number> {
+  const rad = ((design.flapBendDeg || 0) * Math.PI) / 180;
+  const m = new Map<FaceId, number>();
+  if (rad !== 0) for (const id of bendableFaces(state)) m.set(id, rad);
+  return m;
+}
 
 export interface PlaneMetrics {
   /** 半邊寬（中線到最外側，mm）。 */

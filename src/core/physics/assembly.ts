@@ -1,10 +1,10 @@
-import { det } from '../geom/iso';
+import { apply, det } from '../geom/iso';
 import { type Line, signedDist } from '../geom/line';
 import { area, centroid, splitByDistances } from '../geom/polygon';
 import { type Vec2, vec } from '../geom/vec';
 import { type Vec3, add3, normalize3, rotateAxis, sub3, vec3 } from '../geom/vec3';
-import { foldedPolygon } from '../model/face';
-import type { FaceId, PaperState } from '../model/types';
+import { foldedPolygon, getFace } from '../model/face';
+import type { FaceId, Hinge, PaperState } from '../model/types';
 import { PAPER_GSM } from './mass';
 
 /**
@@ -68,12 +68,36 @@ const MIN_PIECE = 1e-3;
 /** 把摺好後的 2D 點嵌進「機身垂直」的基準 3D 位置：x→z（往外變高），y 不變，放在 X = 0 平面。 */
 const embed = (p: Vec2): Vec3 => vec3(0, p.y, p.x);
 
+/** 每一面接到哪些鉸鏈。 */
+function hingesByFace(state: PaperState): Map<FaceId, Hinge[]> {
+  const m = new Map<FaceId, Hinge[]>();
+  for (const h of state.hinges) {
+    for (const fid of h.faces) (m.get(fid) ?? m.set(fid, []).get(fid)!).push(h);
+  }
+  return m;
+}
+
+/**
+ * 可以「翹起」的翼片＝只用一條鉸鏈接到別的面的那些面（其餘的邊都是自由邊）。
+ * 這種面像一片掀蓋，可以繞那條鉸鏈掀起來，不會扯到別處。
+ */
+export function bendableFaces(state: PaperState): FaceId[] {
+  const hinges = hingesByFace(state);
+  return [...state.faces.keys()].filter((id) => (hinges.get(id)?.length ?? 0) === 1).sort((a, b) => a - b);
+}
+
 /**
  * 從摺好的狀態組裝 3D 飛機。
  * @param wingLine 機翼摺線（摺好後的 2D 座標，通常和中線平行）。
  * @param dihedral 上反角（弧度）。0 = 機翼水平，>0 = 翼尖往上翹。
+ * @param bends 可選：某些翼片要「翹起」的角度（弧度），key 是面 id。只有單鉸鏈的翼片會被翹起。
  */
-export function buildAssembly(state: PaperState, wingLine: Line, dihedral: number): Assembly {
+export function buildAssembly(
+  state: PaperState,
+  wingLine: Line,
+  dihedral: number,
+  bends?: ReadonlyMap<FaceId, number>,
+): Assembly {
   // 把整疊紙正規化到 x ≥ 0 半邊（對摺結果本來就是如此，這裡保險處理另一側）。
   let sum = 0;
   for (const f of state.faces.values()) for (const p of foldedPolygon(f)) sum += p.x;
@@ -98,13 +122,31 @@ export function buildAssembly(state: PaperState, wingLine: Line, dihedral: numbe
   const chordDir = rotateAxis(vec3(0, 1, 0), axis, theta);
   const wingIncidence = Math.atan2(chordDir.z, chordDir.y);
 
+  const hingesOf = bends && bends.size > 0 ? hingesByFace(state) : null;
   const pieces: AssemblyPiece[] = [];
   const emit = (faceId: FaceId, region: Region, frontUp: boolean, sub: readonly Vec2[]) => {
     const a = area(sub);
     if (a < MIN_PIECE) return;
     const place = region === 'wing' ? (p: Vec2) => swing(embed(p)) : embed;
-    const poly3d = sub.map(place);
-    const c = place(centroid(sub));
+    let poly3d = sub.map(place);
+    let c = place(centroid(sub));
+
+    // 翼片翹起：繞這一面「唯一那條鉸鏈」轉 bend，讓自由端往上掀。
+    const bend = bends?.get(faceId);
+    const hs = hingesOf?.get(faceId);
+    if (bend && hs && hs.length === 1) {
+      const f = getFace(state, faceId);
+      const aPt = place(nx(apply(f.xf, hs[0].cpSeg[0])));
+      const bPt = place(nx(apply(f.xf, hs[0].cpSeg[1])));
+      const ax = normalize3(sub3(bPt, aPt));
+      // 選讓自由端往上(+z)的旋轉方向
+      let ang = bend;
+      if (add3(aPt, rotateAxis(sub3(c, aPt), ax, ang)).z < c.z) ang = -bend;
+      const rot = (v: Vec3) => add3(aPt, rotateAxis(sub3(v, aPt), ax, ang));
+      poly3d = poly3d.map(rot);
+      c = rot(c);
+    }
+
     // 右半邊
     pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c });
     // 鏡射出左半邊（x 取負號）

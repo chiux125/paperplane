@@ -10,7 +10,7 @@ import {
   stability,
   vec3,
 } from '../../core';
-import { type Design, planeMetrics, wingLineOf } from '../design';
+import { type Design, bendsOf, planeMetrics, wingLineOf } from '../design';
 import { STABILITY_TEXT } from '../text';
 import { Preview3D } from './Preview3D';
 import { StabilityDiagram } from './StabilityDiagram';
@@ -34,8 +34,8 @@ export function PlaneLab(props: PlaneLabProps) {
   const clips = design.clips;
 
   const assembly = useMemo(
-    () => buildAssembly(state, wingLine, deg2rad(design.dihedralDeg)),
-    [state, design.wingFrac, design.tiltDeg, design.dihedralDeg],
+    () => buildAssembly(state, wingLine, deg2rad(design.dihedralDeg), bendsOf(state, design)),
+    [state, design.wingFrac, design.tiltDeg, design.dihedralDeg, design.flapBendDeg],
   );
   const mass = useMemo(() => assemblyMass(assembly, clips), [assembly, clips]);
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
@@ -107,6 +107,16 @@ export function PlaneLab(props: PlaneLabProps) {
             max={30}
             value={design.dihedralDeg}
             onInput={(e) => patch({ dihedralDeg: Number((e.target as HTMLInputElement).value) })}
+          />
+        </div>
+        <div class="control">
+          <label>翼片翹起 {design.flapBendDeg}°</label>
+          <input
+            type="range"
+            min={0}
+            max={80}
+            value={design.flapBendDeg}
+            onInput={(e) => patch({ flapBendDeg: Number((e.target as HTMLInputElement).value) })}
           />
         </div>
         <div class="control clip-control">

@@ -10,7 +10,7 @@ import {
   liftCenter,
   stability,
 } from '../../core';
-import { type Design, planeMetrics, wingLineOf } from '../design';
+import { type Design, bendsOf, planeMetrics, wingLineOf } from '../design';
 import { BEHAVIOR_LABEL } from '../text';
 import { type LogRecord, loadLog, saveLog } from './store';
 
@@ -30,7 +30,7 @@ export function FlightLog(props: FlightLogProps) {
 
   const prediction = useMemo(() => {
     const { halfSpan } = planeMetrics(state);
-    const assembly = buildAssembly(state, wingLineOf(design, halfSpan), deg2rad(design.dihedralDeg));
+    const assembly = buildAssembly(state, wingLineOf(design, halfSpan), deg2rad(design.dihedralDeg), bendsOf(state, design));
     const mass = assemblyMass(assembly, design.clips);
     const pf = liftCenter(assembly);
     const stab = stability(mass.cg, pf.cp, pf.meanChord);

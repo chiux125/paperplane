@@ -21,7 +21,7 @@ import {
   vec3,
   wingChord,
 } from '../../core';
-import { type Design, planeMetrics, wingLineOf } from '../design';
+import { type Design, bendsOf, planeMetrics, wingLineOf } from '../design';
 
 const PLATE_FRAC = 0.3;
 const STEP = 0.03;
@@ -111,8 +111,8 @@ export function WindTunnel(props: WindTunnelProps) {
 
   const { halfSpan } = useMemo(() => planeMetrics(state), [state]);
   const assembly = useMemo(
-    () => buildAssembly(state, wingLineOf(design, halfSpan), deg2rad(design.dihedralDeg)),
-    [state, design.wingFrac, design.tiltDeg, design.dihedralDeg],
+    () => buildAssembly(state, wingLineOf(design, halfSpan), deg2rad(design.dihedralDeg), bendsOf(state, design)),
+    [state, design.wingFrac, design.tiltDeg, design.dihedralDeg, design.flapBendDeg],
   );
   const mass = useMemo(() => assemblyMass(assembly, design.clips), [assembly, design.clips]);
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
