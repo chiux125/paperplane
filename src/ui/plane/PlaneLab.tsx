@@ -147,6 +147,9 @@ export function PlaneLab(props: PlaneLabProps) {
       <div class="planelab-foot">
         飛機重約 {mass.mass.toFixed(1)} 公克 · 穩定裕度約 {(stab.margin * 100).toFixed(0)}%
         · 機翼內建攻角約 {((assembly.wingIncidence * 180) / Math.PI).toFixed(0)}°
+        {planform.dragIndex > 0.02 && (
+          <b>　· 翼片翹起：會飛得比較慢（阻力），升力中心往前（容易仰頭）</b>
+        )}
         （在側面圖上把 📎 往機頭拖，看看重心怎麼變）
       </div>
     </div>

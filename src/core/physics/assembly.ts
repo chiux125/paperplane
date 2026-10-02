@@ -34,6 +34,8 @@ export interface AssemblyPiece {
   readonly area: number;
   /** 這一片在空中的 3D 形心。 */
   readonly centroid: Vec3;
+  /** 這一片是不是被「翼片翹起」掀起來的。 */
+  readonly bent: boolean;
 }
 
 export interface Assembly {
@@ -134,7 +136,8 @@ export function buildAssembly(
     // 翼片翹起：繞這一面「唯一那條鉸鏈」轉 bend，讓自由端往上掀。
     const bend = bends?.get(faceId);
     const hs = hingesOf?.get(faceId);
-    if (bend && hs && hs.length === 1) {
+    const isBent = !!bend && hs?.length === 1;
+    if (isBent && bend && hs) {
       const f = getFace(state, faceId);
       const aPt = place(nx(apply(f.xf, hs[0].cpSeg[0])));
       const bPt = place(nx(apply(f.xf, hs[0].cpSeg[1])));
@@ -148,7 +151,7 @@ export function buildAssembly(
     }
 
     // 右半邊
-    pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c });
+    pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c, bent: isBent });
     // 鏡射出左半邊（x 取負號）
     pieces.push({
       faceId,
@@ -157,6 +160,7 @@ export function buildAssembly(
       poly: poly3d.map((q) => vec3(-q.x, q.y, q.z)),
       area: a,
       centroid: vec3(-c.x, c.y, c.z),
+      bent: isBent,
     });
   };
 

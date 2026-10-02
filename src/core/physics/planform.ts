@@ -1,5 +1,5 @@
-import { type Vec3, vec3 } from '../geom/vec3';
-import type { Assembly } from './assembly';
+import { type Vec3, cross3, length3, normalize3, sub3, vec3 } from '../geom/vec3';
+import type { Assembly, AssemblyPiece } from './assembly';
 
 /**
  * 升力中心（CP，近似）與機翼平面尺寸，用「25% 翼弦條帶法」：
@@ -20,9 +20,21 @@ export interface Planform {
   readonly area: number;
   /** 平均翼弦長（mm）= 投影面積 / 翼展。穩定裕度用它正規化。 */
   readonly meanChord: number;
+  /** 翹起翼片造成的阻力指標（0 = 沒翹，越大越會「飛得慢」）。示意用。 */
+  readonly dragIndex: number;
 }
 
 const STRIPS = 240;
+
+/** 一片（平面多邊形）的法向量（單位向量）。 */
+function pieceNormal(p: AssemblyPiece): Vec3 {
+  const v = p.poly;
+  for (let i = 2; i < v.length; i++) {
+    const n = cross3(sub3(v[i - 1], v[0]), sub3(v[i], v[0]));
+    if (length3(n) > 1e-9) return normalize3(n);
+  }
+  return vec3(0, 0, 1);
+}
 
 /** 凸多邊形在 x = xc 的垂直切片涵蓋的 y 範圍；沒切到回傳 null。 */
 function sliceY(poly: readonly { x: number; y: number }[], xc: number): [number, number] | null {
@@ -49,8 +61,9 @@ function sliceY(poly: readonly { x: number; y: number }[], xc: number): [number,
 }
 
 export function liftCenter(assembly: Assembly): Planform {
-  const wings = assembly.pieces.filter((p) => p.region === 'wing');
-  const empty: Planform = { cp: vec3(0, 0, 0), span: 0, area: 0, meanChord: 0 };
+  // 翹起的翼片不算進機翼平面（它傾斜了），改用「前翼效應」另外算。
+  const wings = assembly.pieces.filter((p) => p.region === 'wing' && !p.bent);
+  const empty: Planform = { cp: vec3(0, 0, 0), span: 0, area: 0, meanChord: 0, dragIndex: 0 };
   if (wings.length === 0) return empty;
 
   let minX = Infinity;
@@ -98,6 +111,26 @@ export function liftCenter(assembly: Assembly): Planform {
 
   if (chordSum === 0) return empty;
   const span = coveredMax - coveredMin + dx;
-  const cp = vec3(xSum / chordSum, yqSum / chordSum, zW > 0 ? zSum / zW : 0);
-  return { cp, span, area: areaSum, meanChord: areaSum / span };
+  const wingCpY = yqSum / chordSum;
+  const wingCpZ = zW > 0 ? zSum / zW : 0;
+
+  // 前翼效應（示意）：翹起的翼片迎風，底面產生升力。
+  // 每片升力 ∝ 面積 × sinτ·cosτ（τ = 片面離水平的傾角，45° 最大）；阻力 ∝ 面積 × sin²τ。
+  // 翹起的翼片在機頭前方，把整架飛機的升力中心往前拉 → 穩定裕度變小、容易仰頭。
+  let canardLift = 0;
+  let canardY = 0;
+  let drag = 0;
+  for (const p of assembly.pieces) {
+    if (!p.bent) continue;
+    const tilt = Math.acos(Math.min(1, Math.abs(pieceNormal(p).z))); // 0 = 水平、π/2 = 垂直
+    const s = Math.sin(tilt);
+    canardLift += p.area * s * Math.cos(tilt);
+    canardY += p.area * s * Math.cos(tilt) * p.centroid.y;
+    drag += p.area * s * s;
+  }
+
+  const totalLift = areaSum + canardLift;
+  const cpY = canardLift > 0 ? (areaSum * wingCpY + canardY) / totalLift : wingCpY;
+  const cp = vec3(xSum / chordSum, cpY, wingCpZ);
+  return { cp, span, area: areaSum, meanChord: areaSum / span, dragIndex: drag / areaSum };
 }

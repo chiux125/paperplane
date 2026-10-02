@@ -49,3 +49,22 @@ describe('翼片翹起（幾何）', () => {
     expect(liftCenter(bent).cp.x).toBeCloseTo(0, 6);
   });
 });
+
+describe('翼片翹起（前翼效應＋阻力）', () => {
+  it('翹起 0 度：阻力 0、升力中心和原本一樣', () => {
+    const s = cornerFolded();
+    const flat = liftCenter(buildAssembly(s, wingLine, 0));
+    const zero = liftCenter(buildAssembly(s, wingLine, 0, new Map([[bendableFaces(s)[0], 0]])));
+    expect(flat.dragIndex).toBe(0);
+    expect(zero.cp.y).toBeCloseTo(flat.cp.y, 9);
+  });
+
+  it('翹起後：前翼讓升力中心往前（+y）移、阻力變大', () => {
+    const s = cornerFolded();
+    const flap = bendableFaces(s).sort((a, b) => area(getFace(s, a).cp) - area(getFace(s, b).cp))[0] as FaceId;
+    const flat = liftCenter(buildAssembly(s, wingLine, 0));
+    const bent = liftCenter(buildAssembly(s, wingLine, 0, new Map([[flap, deg(40)]])));
+    expect(bent.cp.y).toBeGreaterThan(flat.cp.y); // 往機頭(+y) → 升力中心前移
+    expect(bent.dragIndex).toBeGreaterThan(flat.dragIndex);
+  });
+});
