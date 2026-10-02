@@ -16,12 +16,15 @@ import {
   createSheet,
   current,
   doneOps,
+  foldToJson,
   flipOutcome,
   isHalved,
   paperMass,
   pushApplied,
+  readPaperplane,
   redo,
   replay,
+  toFold,
   undo,
   vec,
 } from '../core';
@@ -54,6 +57,7 @@ export function App() {
   const [reverseMode, setReverseMode] = useState(false);
   const [reverseOpts, setReverseOpts] = useState<{ options: ReverseOption[]; line: Line; pick: Vec2 } | null>(null);
   const messageTimer = useRef<number | undefined>(undefined);
+  const fileInput = useRef<HTMLInputElement>(null);
   const state = current(history);
   const busy = animation !== null;
   const halved = isHalved(state);
@@ -138,6 +142,31 @@ export function App() {
     setMode('plane');
   };
 
+  /** 存成 FOLD 檔（含 paperplane: 步驟與設計，之後可原封不動開啟）。 */
+  const saveFold = () => {
+    const json = foldToJson(toFold(state, { ops: doneOps(history), design }));
+    const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '紙飛機.fold';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const openFold = async (e: Event) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    (e.target as HTMLInputElement).value = ''; // 允許重複選同一個檔
+    if (!file) return;
+    const data = readPaperplane(await file.text());
+    if (!data) return say('這個檔案打不開，或不是這裡存的');
+    const r = replay(createSheet(data.sheet), data.ops);
+    if (!r.ok) return say('載入失敗，檔案可能壞了');
+    setPending(null);
+    setReverseOpts(null);
+    setHistory(r.value);
+    if (data.design) setDesign(data.design as Design);
+    setMode('fold');
+  };
+
   /** 反摺：畫線並點了一側後，算出合法選項讓孩子挑。 */
   const onReverse = (line: Line, pick: Vec2) => {
     const options = reverseFoldOptions(state, line, pick);
@@ -218,6 +247,19 @@ export function App() {
           <button class="action" disabled={busy} onClick={() => setConfirmNew(true)}>
             📄<span>新的紙</span>
           </button>
+          <button class="action" disabled={busy} onClick={saveFold} title="存成檔案（FOLD 格式）">
+            💾<span>存檔</span>
+          </button>
+          <button class="action" disabled={busy} onClick={() => fileInput.current?.click()} title="打開之前存的檔案">
+            📂<span>開啟</span>
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".fold,application/json"
+            style="display:none"
+            onChange={openFold}
+          />
         </div>
       </header>
 

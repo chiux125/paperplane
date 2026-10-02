@@ -27,4 +27,5 @@ export * from './physics/topflow';
 export * from './validate/validate';
 export * from './history';
 export * from './log/flightLog';
+export * from './io/fold';
 export * from './result';
