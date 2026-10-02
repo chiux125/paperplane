@@ -237,6 +237,14 @@ h1 {
   font-size: 15px;
 }
 
+.flap-flow-note {
+  padding: 6px 18px;
+  border-radius: 12px;
+  background: #fff4e0;
+  color: #a35a00;
+  font-size: 17px;
+}
+
 .flap-hint {
   font-size: 16px;
   color: #a35a00;

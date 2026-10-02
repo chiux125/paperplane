@@ -2,13 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   type Assembly,
   type PaperState,
+  type SideFlap,
+  type TopFlapWake,
   type Vec2,
   STALL_ANGLE_DEG,
   assemblyMass,
   buildAssembly,
   circulationMag,
+  flapFlowAt,
   flowAt,
   inWake,
+  rotateSideFlaps,
+  sideFlaps,
+  topFlapWakeAt,
+  topFlapWakes,
+  wakeSpeedFactor,
   isStalled,
   liftCenter,
   pitchAccel,
@@ -53,6 +61,8 @@ interface Geom {
   };
   /** 俯視投影（u=離機頭的順流距離, v=翼展）。 */
   top: { chord: number; halfSpan: number; wings: Vec2[][]; fuse: Vec2[][] };
+  /** 翹起的翼片：側視的小傾斜板（未依攻角旋轉）、俯視的尾流帶。沒翹就是空的。 */
+  flaps: { side: SideFlap[]; top: TopFlapWake[] };
 }
 
 function buildGeom(assembly: Assembly, cg: { y: number; z: number }, cp: { y: number; z: number }): Geom {
@@ -95,6 +105,7 @@ function buildGeom(assembly: Assembly, cg: { y: number; z: number }, cp: { y: nu
     incidence: assembly.wingIncidence,
     side: { chord, center, wings: sideWings, fuse: sideFuse, cg: vec(cg.y, cg.z), cp: vec(cp.y, cp.z) },
     top: { chord, halfSpan, wings: topWings, fuse: topFuse },
+    flaps: { side: sideFlaps(assembly, center, chord), top: topFlapWakes(assembly, topWing(assembly).rootChord) },
   };
 }
 
@@ -213,18 +224,26 @@ export function WindTunnel(props: WindTunnelProps) {
       ctx.fillRect(0, 0, w, h);
       ctx.lineWidth = 1.6;
       ctx.lineCap = 'round';
+      // 翹起的翼片跟著機翼一起依攻角轉
+      const flaps = rotateSideFlaps(g.flaps.side, alpha - g.incidence);
       for (const p of particles) {
-        let v = flowAt(alpha, vec(p.x, p.y));
-        const wake = inWake(alpha, vec(p.x, p.y));
-        if (wake) {
+        const here = vec(p.x, p.y);
+        const fl = flapFlowAt(flaps, flowAt(alpha, here), here);
+        let v = fl.v;
+        const stallWake = inWake(alpha, here);
+        const turb = Math.max(stallWake ? 1 : 0, fl.wake);
+        if (turb > 0) {
           const t = performance.now() * 0.004;
-          v = vec(v.x + 0.5 * Math.sin(3 * p.x + 2 * p.y + t), v.y + 0.5 * Math.cos(2.4 * p.y - 1.7 * p.x + t * 1.3));
+          const k = 0.5 * turb;
+          v = vec(v.x + k * Math.sin(3 * p.x + 2 * p.y + t), v.y + k * Math.cos(2.4 * p.y - 1.7 * p.x + t * 1.3));
         }
+        const wake = stallWake || fl.wake > 0.15;
         p.px = p.x;
         p.py = p.y;
         p.x += v.x * STEP;
         p.y += v.y * STEP;
         noPenetrate(p, pl);
+        for (const f of flaps) noPenetrateSegment(p, f.base, f.tip);
         if (p.x > geo.xR + 0.15 || Math.abs(p.y) > geo.halfH + 0.3 || p.x < geo.xL - 0.3) {
           spawn(p, geo.xL - Math.random() * 0.1);
           continue;
@@ -299,7 +318,8 @@ export function WindTunnel(props: WindTunnelProps) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         setFit();
       }
-      const g = live.current.geom.top;
+      const g2 = live.current.geom;
+      const g = g2.top;
       const wingT = live.current.tw;
       const alpha = live.current.effRad;
       const st = live.current.stalled;
@@ -320,15 +340,21 @@ export function WindTunnel(props: WindTunnelProps) {
 
       for (const p of particles) {
         const vel = topFlowAt(wingT, alpha, vec3(p.u, p.v, p.z));
+        let du = vel.x;
         let dv = vel.y;
         let dz = vel.z;
         // 失速：機翼正後方（翼展內）保留亂流
-        const inWakeTop = st && p.u > teU * 0.6 && p.u < teU + 1.3 && Math.abs(p.v) < halfSpanN;
-        if (inWakeTop) {
-          dv += 0.7 * Math.sin(5 * p.u + 3 * p.v + t * 6);
-          dz += 0.7 * Math.cos(4 * p.v - 3 * p.u + t * 5);
+        const stallWake = st && p.u > teU * 0.6 && p.u < teU + 1.3 && Math.abs(p.v) < halfSpanN;
+        // 翹起的翼片：後面拖著一條變慢、變亂的尾流
+        const flapWake = topFlapWakeAt(g2.flaps.top, p.u, p.v);
+        const turb = Math.max(stallWake ? 1 : 0, flapWake);
+        if (turb > 0) {
+          dv += 0.7 * turb * Math.sin(5 * p.u + 3 * p.v + t * 6);
+          dz += 0.7 * turb * Math.cos(4 * p.v - 3 * p.u + t * 5);
         }
-        p.u += vel.x * STEP_TOP;
+        if (flapWake > 0) du *= wakeSpeedFactor(flapWake);
+        const inWakeTop = stallWake || flapWake > 0.15;
+        p.u += du * STEP_TOP;
         p.v += dv * STEP_TOP;
         p.z += dz * STEP_TOP;
         if (p.u > uEnd + 0.1) {
@@ -392,6 +418,9 @@ export function WindTunnel(props: WindTunnelProps) {
         <span>{status.text}</span>
         <span class="flow-note">這是示意，最後以實際射出為準</span>
       </div>
+      {geom.flaps.side.length > 0 && (
+        <div class="flap-flow-note">🍃 翼片翹起來了：後面的空氣變亂、變慢（橘色的煙）→ 會飛得比較慢，機頭也比較容易自己抬起來</div>
+      )}
 
       <div class="tunnel-views">
         <div class="tunnel-wrap">
@@ -442,6 +471,26 @@ function noPenetrate(p: Particle, pl: ReturnType<typeof plate>) {
     const side = prevAbove >= 0 ? 1 : -1;
     p.x = pl.le.x + pl.dir.x * along + pl.nUp.x * side * eps;
     p.y = pl.le.y + pl.dir.y * along + pl.nUp.y * side * eps;
+  }
+}
+
+/** 煙不能穿過翹起的翼片：碰到就停在板子迎風的那一面，讓它從上面繞過去。 */
+function noPenetrateSegment(p: Particle, a: Vec2, b: Vec2) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return;
+  const tx = dx / len;
+  const ty = dy / len;
+  const along = ((p.x - a.x) * tx + (p.y - a.y) * ty) / len;
+  if (along < 0 || along > 1) return;
+  const side = (p.x - a.x) * -ty + (p.y - a.y) * tx;
+  const prevSide = (p.px - a.x) * -ty + (p.py - a.y) * tx;
+  const eps = 0.012;
+  if (Math.abs(side) < eps || side * prevSide < 0) {
+    const s = prevSide >= 0 ? 1 : -1;
+    p.x = a.x + dx * along - ty * s * eps;
+    p.y = a.y + dy * along + tx * s * eps;
   }
 }
 

@@ -22,6 +22,7 @@ export * from './physics/mass';
 export * from './physics/assembly';
 export * from './physics/display';
 export * from './physics/flaps';
+export * from './physics/flapflow';
 export * from './physics/planform';
 export * from './physics/stability';
 export * from './physics/windtunnel';
