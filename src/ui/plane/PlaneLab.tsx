@@ -6,6 +6,7 @@ import {
   type Vec3,
   assemblyMass,
   buildAssembly,
+  displayPieces,
   liftCenter,
   stability,
   vec3,
@@ -37,6 +38,7 @@ export function PlaneLab(props: PlaneLabProps) {
     () => buildAssembly(state, wingLine, deg2rad(design.dihedralDeg), bendsOf(state, design)),
     [state, design.wingFrac, design.tiltDeg, design.dihedralDeg, design.flapBendDeg],
   );
+  const shown = useMemo(() => displayPieces(state, assembly), [state, assembly]);
   const mass = useMemo(() => assemblyMass(assembly, clips), [assembly, clips]);
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
   const stab = useMemo(() => stability(mass.cg, planform.cp, planform.meanChord), [mass, planform]);
@@ -65,7 +67,7 @@ export function PlaneLab(props: PlaneLabProps) {
       <div class="planelab-main">
         <div class="preview-wrap">
           <div class="panel-label">用滑鼠拖一拖，轉轉看飛機 ✈️</div>
-          <Preview3D assembly={assembly} cg={mass.cg} cp={planform.cp} clips={clips} />
+          <Preview3D pieces={shown} cg={mass.cg} cp={planform.cp} clips={clips} />
         </div>
         <div class="diagram-wrap">
           <StabilityDiagram

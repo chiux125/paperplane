@@ -27,6 +27,24 @@ export function isBetween(orders: Orders, t: FaceId, f: FaceId, g: FaceId): bool
 }
 
 /**
+ * 每一面在「局部」疊了幾層：壓在它下面、而且和它重疊的最長一串面有幾片。
+ * 不重疊的面互不影響，所以旁邊的紙疊得再厚也不會把它墊高。
+ * 保證：f 在 g 上面（且重疊）⇒ depth(f) > depth(g)。層序有循環時盡量給值，不保證。
+ */
+export function layerDepths(s: PaperState): Map<FaceId, number> {
+  const order = stackOrder(s) ?? faceList(s).map((f) => f.id);
+  const depth = new Map<FaceId, number>();
+  for (const id of order) {
+    let d = 0;
+    for (const [g, dg] of depth) {
+      if (getOrder(s.orders, id, g) === 1) d = Math.max(d, dg + 1);
+    }
+    depth.set(id, d);
+  }
+  return depth;
+}
+
+/**
  * 由下到上的繪製順序（拓撲排序，同層時 id 小的先）。
  * 有循環（例如某些內翻摺造成 A>B>C>A 分別在不同區域）時回傳 null，
  * 這時繪圖要改用「分割成小格子、每格各自排序」的方式。

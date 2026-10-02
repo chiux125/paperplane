@@ -36,6 +36,10 @@ export interface AssemblyPiece {
   readonly centroid: Vec3;
   /** 這一片是不是被「翼片翹起」掀起來的。 */
   readonly bent: boolean;
+  /** 是不是鏡射出來的那一份（x 取負號）。 */
+  readonly mirrored: boolean;
+  /** 單位法向量，指向這一面在摺紙畫面中「朝上」（朝螢幕外）的那一側。 */
+  readonly up: Vec3;
 }
 
 export interface Assembly {
@@ -132,6 +136,10 @@ export function buildAssembly(
     const place = region === 'wing' ? (p: Vec2) => swing(embed(p)) : embed;
     let poly3d = sub.map(place);
     let c = place(centroid(sub));
+    // 摺紙畫面的「朝上」：embed 把 2D 的 x、y 送到 z、y，朝上 (x × y) 就落在 -x；
+    // 正規化時若左右翻過（sx = -1），方向也跟著反過來。
+    let up = vec3(-sx, 0, 0);
+    if (region === 'wing') up = rotateAxis(up, axis, theta);
 
     // 翼片翹起：繞這一面「唯一那條鉸鏈」轉 bend，讓自由端往上掀。
     const bend = bends?.get(faceId);
@@ -148,10 +156,11 @@ export function buildAssembly(
       const rot = (v: Vec3) => add3(aPt, rotateAxis(sub3(v, aPt), ax, ang));
       poly3d = poly3d.map(rot);
       c = rot(c);
+      up = rotateAxis(up, ax, ang);
     }
 
     // 右半邊
-    pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c, bent: isBent });
+    pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c, bent: isBent, mirrored: false, up });
     // 鏡射出左半邊（x 取負號）
     pieces.push({
       faceId,
@@ -161,6 +170,8 @@ export function buildAssembly(
       area: a,
       centroid: vec3(-c.x, c.y, c.z),
       bent: isBent,
+      mirrored: true,
+      up: vec3(-up.x, up.y, up.z),
     });
   };
 

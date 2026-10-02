@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { Assembly, Paperclip, Vec3 } from '../../core';
+import { type DisplayPiece, PAPER_THICKNESS, type Paperclip, type Vec3 } from '../../core';
 
 // 和 2D 編輯區一致的顏色（render.ts）。
 const FRONT = 0xfdfbf5;
@@ -12,7 +12,8 @@ const EDGE = 0x6b5b45;
 const m = (v: Vec3) => new THREE.Vector3(v.x, v.z, -v.y);
 
 export interface Preview3DProps {
-  readonly assembly: Assembly;
+  /** 已依真實飛機擺好、依層序錯開的紙片（見 core/physics/display.ts）。 */
+  readonly pieces: readonly DisplayPiece[];
   readonly cg: Vec3;
   readonly cp: Vec3;
   readonly clips: readonly Paperclip[];
@@ -110,52 +111,73 @@ export function Preview3D(props: Preview3DProps) {
     }
 
     const box = new THREE.Box3();
-    // 每一條邊：記下用到它的每一片的法向量，用來判斷相接的兩片是不是同一平面。
-    const edgeMap = new Map<string, { a: THREE.Vector3; b: THREE.Vector3; n: THREE.Vector3 }[]>();
+    // 每一條邊（用錯開前的位置對齊）：記下用到它的每一片，用來找出「同一層裡並排的兩片」之間的摺痕。
+    const edgeMap = new Map<string, { piece: number; side: number }[]>();
+    const pieces = props.pieces;
 
-    for (const piece of props.assembly.pieces) {
+    pieces.forEach((piece, idx) => {
       const verts = piece.poly.map(m);
       verts.forEach((v) => box.expandByPoint(v));
-      // 扇形三角化（面都是凸的）
+      const up = m(piece.up);
+      // 扇形三角化（面都是凸的），三角形的正面一律朝「摺紙畫面的朝上」那側，
+      // 這樣正面材質畫那一側的顏色、背面材質畫另一側的顏色，一張紙兩面顏色才對。
+      const flip = faceNormal(verts).dot(up) < 0;
       const pos: number[] = [];
       for (let i = 1; i < verts.length - 1; i++) {
-        pos.push(verts[0].x, verts[0].y, verts[0].z);
-        pos.push(verts[i].x, verts[i].y, verts[i].z);
-        pos.push(verts[i + 1].x, verts[i + 1].y, verts[i + 1].z);
+        const [b, c] = flip ? [verts[i + 1], verts[i]] : [verts[i], verts[i + 1]];
+        pos.push(verts[0].x, verts[0].y, verts[0].z, b.x, b.y, b.z, c.x, c.y, c.z);
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.computeVertexNormals();
-      const mat = new THREE.MeshLambertMaterial({
-        color: piece.frontUp ? FRONT : BACK,
-        side: THREE.DoubleSide,
-      });
-      grp.add(new THREE.Mesh(geo, mat));
-
-      const n = faceNormal(verts);
-      for (let i = 0; i < verts.length; i++) {
-        const a = verts[i];
-        const b = verts[(i + 1) % verts.length];
-        const key = edgeKey(a, b);
-        (edgeMap.get(key) ?? edgeMap.set(key, []).get(key)!).push({ a, b, n });
+      const upColor = piece.frontUp ? FRONT : BACK;
+      const downColor = piece.frontUp ? BACK : FRONT;
+      for (const [side, color] of [
+        [THREE.FrontSide, upColor],
+        [THREE.BackSide, downColor],
+      ] as const) {
+        const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color, side }));
+        mesh.userData.faceId = piece.faceId; // 之後用來點選最外層的翼片
+        grp.add(mesh);
       }
-    }
 
-    // 只畫「每一層的外緣／層與層交界」＝被單獨一片用到的邊，以及「真正的彎折」＝兩片不同平面相接。
-    // 兩片在同一平面相接的邊（攤平的摺痕或對摺回來的邊）都隱藏。
-    const COPLANAR = Math.cos((15 * Math.PI) / 180);
+      const base = piece.base.map(m);
+      const c = base.reduce((s, v) => s.add(v), new THREE.Vector3()).divideScalar(base.length);
+      for (let i = 0; i < base.length; i++) {
+        const a = base[i];
+        const b = base[(i + 1) % base.length];
+        // 這一片在這條邊的哪一側（並排的兩片會在不同側，摺過來疊住的兩片在同一側）
+        const side = Math.sign(new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).dot(up));
+        const key = edgeKey(a, b);
+        (edgeMap.get(key) ?? edgeMap.set(key, []).get(key)!).push({ piece: idx, side });
+      }
+    });
+
+    // 畫每一片的外緣，但跳過「同一平面、同一朝向、並排在兩側」的邊——那是攤平的摺痕，不是層與層的交界。
+    // 邊線沿法線往兩側各挪一點點：從哪一面看都畫得出來，又不會穿過蓋在上面的那層紙。
+    const SAME_PLANE = Math.cos((15 * Math.PI) / 180);
+    const NUDGE = PAPER_THICKNESS * 0.3;
     const linePos: number[] = [];
-    for (const recs of edgeMap.values()) {
-      let hide = false;
-      for (let i = 0; i < recs.length && !hide; i++) {
-        for (let j = i + 1; j < recs.length; j++) {
-          if (Math.abs(recs[i].n.dot(recs[j].n)) > COPLANAR) { hide = true; break; }
+    pieces.forEach((piece, idx) => {
+      const verts = piece.poly.map(m);
+      const base = piece.base.map(m);
+      const up = m(piece.up);
+      for (let i = 0; i < verts.length; i++) {
+        const j = (i + 1) % verts.length;
+        const recs = edgeMap.get(edgeKey(base[i], base[j]))!;
+        const mine = recs.find((r) => r.piece === idx)!;
+        const seam = recs.some(
+          (r) => r.piece !== idx && r.side === -mine.side && m(pieces[r.piece].up).dot(up) > SAME_PLANE,
+        );
+        if (seam) continue;
+        for (const k of [NUDGE, -NUDGE]) {
+          const off = up.clone().multiplyScalar(k);
+          const a = verts[i].clone().add(off);
+          const b = verts[j].clone().add(off);
+          linePos.push(a.x, a.y, a.z, b.x, b.y, b.z);
         }
       }
-      if (hide) continue;
-      const { a, b } = recs[0];
-      linePos.push(a.x, a.y, a.z, b.x, b.y, b.z);
-    }
+    });
     const outline = new THREE.BufferGeometry();
     outline.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
     grp.add(new THREE.LineSegments(outline, new THREE.LineBasicMaterial({ color: EDGE })));
@@ -173,12 +195,15 @@ export function Preview3D(props: Preview3DProps) {
     const center = box.getCenter(new THREE.Vector3());
     ctl.target.copy(center);
     cam.position.set(center.x + size * 0.7, center.y + size * 0.55, center.z + size * 1.1);
-    cam.near = size / 100;
-    cam.far = size * 100;
+    // near 不要太小：疊在一起的紙只差零點幾 mm，深度緩衝要夠精細才分得出上下層。
+    cam.near = size / 30;
+    cam.far = size * 30;
+    ctl.minDistance = size / 6;
+    ctl.maxDistance = size * 8;
     cam.updateProjectionMatrix();
     ctl.update();
     r.render(s, cam);
-  }, [props.assembly, props.cg, props.cp, props.clips]);
+  }, [props.pieces, props.cg, props.cp, props.clips]);
 
   return <div class="preview3d" ref={mount} />;
 }
