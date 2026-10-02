@@ -4,6 +4,7 @@ import { area, centroid, splitByDistances } from '../geom/polygon';
 import { type Vec2, vec } from '../geom/vec';
 import { type Vec3, add3, normalize3, rotateAxis, sub3, vec3 } from '../geom/vec3';
 import { foldedPolygon, getFace } from '../model/face';
+import { stackOrder } from '../model/orders';
 import type { FaceId, Hinge, PaperState } from '../model/types';
 import { PAPER_GSM } from './mass';
 
@@ -36,6 +37,8 @@ export interface AssemblyPiece {
   readonly centroid: Vec3;
   /** 這一片是不是被「翼片翹起」掀起來的。 */
   readonly bent: boolean;
+  /** 這一面的層序（由下到上 0,1,2…；給 3D 分層顯示用）。 */
+  readonly layer: number;
 }
 
 export interface Assembly {
@@ -125,6 +128,9 @@ export function buildAssembly(
   const wingIncidence = Math.atan2(chordDir.z, chordDir.y);
 
   const hingesOf = bends && bends.size > 0 ? hingesByFace(state) : null;
+  // 層序（由下到上），給 3D 分層顯示用。
+  const order = stackOrder(state) ?? [...state.faces.keys()].sort((a, b) => a - b);
+  const layerOf = new Map<FaceId, number>(order.map((id, i) => [id, i]));
   const pieces: AssemblyPiece[] = [];
   const emit = (faceId: FaceId, region: Region, frontUp: boolean, sub: readonly Vec2[]) => {
     const a = area(sub);
@@ -150,8 +156,9 @@ export function buildAssembly(
       c = rot(c);
     }
 
+    const layer = layerOf.get(faceId) ?? 0;
     // 右半邊
-    pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c, bent: isBent });
+    pieces.push({ faceId, region, frontUp, poly: poly3d, area: a, centroid: c, bent: isBent, layer });
     // 鏡射出左半邊（x 取負號）
     pieces.push({
       faceId,
@@ -161,6 +168,7 @@ export function buildAssembly(
       area: a,
       centroid: vec3(-c.x, c.y, c.z),
       bent: isBent,
+      layer,
     });
   };
 
