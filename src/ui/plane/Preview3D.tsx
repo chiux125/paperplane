@@ -7,9 +7,9 @@ import { type DisplayPiece, type FaceId, PAPER_THICKNESS, type Paperclip, type V
 const FRONT = 0xfdfbf5;
 const BACK = 0xf6c667;
 const EDGE = 0x6b5b45;
-// 翼片點選：滑鼠指著（暖色）、已選（藍色），用自發光疊一層顏色。
-const HOVER_GLOW = 0xff8a00;
-const SELECTED_GLOW = 0x1c64c8;
+// 翼片點選：滑鼠指著變橘、已選變藍（直接換顏色；白紙已經很亮，用發光看不出來）。
+const HOVER_TINT = new THREE.Color(0xff8c1a);
+const SELECTED_TINT = new THREE.Color(0x3b82e0);
 /** 按下到放開移動不超過這麼多 px 才算「點一下」，超過就是在轉飛機。 */
 const CLICK_PX = 5;
 
@@ -207,6 +207,7 @@ export function Preview3D(props: Preview3DProps) {
       ] as const) {
         const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color, side }));
         mesh.userData.faceId = piece.faceId; // 點選最外層的翼片用
+        mesh.userData.baseColor = color;
         grp.add(mesh);
         const list = meshes.current.get(piece.faceId) ?? [];
         list.push(mesh);
@@ -272,7 +273,7 @@ export function Preview3D(props: Preview3DProps) {
       cam.position.set(center.x + size * 0.7, center.y + size * 0.55, center.z + size * 1.1);
       framedSize.current = size;
     }
-    applyGlow(meshes.current, props.hovered, props.selected);
+    applyGlow(meshes.current, props.hovered, props.selected, props.clickable);
     // near 不要太小：疊在一起的紙只差零點幾 mm，深度緩衝要夠精細才分得出上下層。
     cam.near = size / 30;
     cam.far = size * 30;
@@ -285,10 +286,10 @@ export function Preview3D(props: Preview3DProps) {
 
   // 只換發光顏色，不用重建整架飛機。
   useEffect(() => {
-    applyGlow(meshes.current, props.hovered, props.selected);
+    applyGlow(meshes.current, props.hovered, props.selected, props.clickable);
     const r = renderer.current;
     if (r && scene.current && camera.current) r.render(scene.current, camera.current);
-  }, [props.hovered, props.selected]);
+  }, [props.hovered, props.selected, props.clickable]);
 
   return <div class="preview3d" ref={mount} />;
 }
@@ -297,13 +298,15 @@ function applyGlow(
   byFace: Map<FaceId, THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>[]>,
   hovered: ReadonlySet<FaceId> | undefined,
   selected: ReadonlySet<FaceId> | undefined,
+  clickable: ReadonlySet<FaceId> | undefined,
 ) {
   for (const [id, list] of byFace) {
-    const glow = selected?.has(id) ? SELECTED_GLOW : hovered?.has(id) ? HOVER_GLOW : 0x000000;
-    const strength = selected?.has(id) ? 0.45 : 0.35;
     for (const mesh of list) {
-      mesh.material.emissive.setHex(glow);
-      mesh.material.emissiveIntensity = glow ? strength : 0;
+      const base = new THREE.Color(mesh.userData.baseColor as number);
+      if (selected?.has(id)) mesh.material.color.lerpColors(base, SELECTED_TINT, 0.6);
+      else if (hovered?.has(id)) mesh.material.color.lerpColors(base, HOVER_TINT, 0.55);
+      else if (clickable?.has(id)) mesh.material.color.lerpColors(base, HOVER_TINT, 0.18); // 平常就淡淡發亮，讓孩子知道可以點
+      else mesh.material.color.copy(base);
     }
   }
 }

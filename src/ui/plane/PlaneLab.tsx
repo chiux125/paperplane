@@ -11,8 +11,8 @@ import {
   displayPieces,
   flapAnchor,
   flapIndexOf,
+  flapPartners,
   liftCenter,
-  mirrorFace,
   resolveFlapBends,
   stability,
   vec3,
@@ -52,14 +52,10 @@ export function PlaneLab(props: PlaneLabProps) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const sel = selectedIdx !== null && selectedIdx < flaps.length ? selectedIdx : null;
-  /** 這一面和它左右對稱的那一面。 */
-  const pair = (id: FaceId): Set<FaceId> => {
-    const m = mirrorFace(state, id);
-    return new Set(m === null ? [id] : [id, m]);
-  };
+  // 滑鼠指著的那片翼片（連同左右對稱的那片）一起發亮
   const hovered = useMemo(
-    () => (hoverId !== null && bendable.has(hoverId) ? pair(hoverId) : new Set<FaceId>()),
-    [hoverId, bendable, state],
+    () => new Set(hoverId !== null ? flapPartners(state, hoverId) : []),
+    [hoverId, state],
   );
   const selected = useMemo(
     () => (sel === null ? new Set<FaceId>() : new Set(resolveFlapBends(state, [{ ...flaps[sel], deg: 1 }]).keys())),
