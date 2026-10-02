@@ -7,8 +7,6 @@ import type { Assembly, Paperclip, Vec3 } from '../../core';
 const FRONT = 0xfdfbf5;
 const BACK = 0xf6c667;
 const EDGE = 0x6b5b45;
-/** 分層顯示：每高一層就沿法向量錯開這麼多（mm），讓疊在一起的紙片分得開。 */
-const LAYER_GAP = 2.5;
 
 /** 本專案座標（x 翼展、y 前後機頭 +y、z 上下）→ Three（Y 朝上）。 */
 const m = (v: Vec3) => new THREE.Vector3(v.x, v.z, -v.y);
@@ -117,13 +115,6 @@ export function Preview3D(props: Preview3DProps) {
 
     for (const piece of props.assembly.pieces) {
       const verts = piece.poly.map(m);
-      // 分層顯示：每一層依層序沿法向量稍微錯開，疊在一起的紙片就看得出是不同層。
-      if (piece.layer > 0) {
-        const nn = faceNormal(verts);
-        if (nn.y < -1e-6 || (Math.abs(nn.y) < 1e-6 && nn.x < 0)) nn.multiplyScalar(-1); // 統一朝上
-        const off = nn.multiplyScalar(piece.layer * LAYER_GAP);
-        verts.forEach((v) => v.add(off));
-      }
       verts.forEach((v) => box.expandByPoint(v));
       // 扇形三角化（面都是凸的）
       const pos: number[] = [];
