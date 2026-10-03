@@ -526,7 +526,7 @@ export function WindTunnel(props: WindTunnelProps) {
         </div>
       </div>
       <div class="tunnel-foot">
-        把攻角慢慢調大看什麼時候「亂掉」（失速約 {STALL_ANGLE_DEG}°）· 🔴重心 🔵升力中心 · 到「看飛機」改機翼位置／斜度／迴紋針，這裡會跟著變
+        把攻角慢慢調大看什麼時候「亂掉」（失速約 {STALL_ANGLE_DEG}°）· 🔴重心 🔵升力中心 · 左邊改機翼位置／斜度／翹翼片，這裡會跟著變
       </div>
     </div>
   );

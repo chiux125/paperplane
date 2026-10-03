@@ -2,9 +2,6 @@ import { useMemo, useState } from 'preact/hooks';
 import {
   type FaceId,
   type PaperState,
-  type Paperclip,
-  type PaperclipSize,
-  type Vec3,
   assemblyMass,
   bendableFaces,
   buildAssembly,
@@ -15,14 +12,11 @@ import {
   flapPartners,
   liftCenter,
   stability,
-  vec3,
 } from '../../core';
 import { type Design, bendsOf, flapKey, planeMetrics, wingLineOf } from '../design';
 import { STABILITY_TEXT } from '../text';
 import { Preview3D } from './Preview3D';
-import { StabilityDiagram } from './StabilityDiagram';
 
-const MAX_CLIPS = 3;
 const deg2rad = (d: number) => (d * Math.PI) / 180;
 
 export interface PlaneLabProps {
@@ -33,10 +27,8 @@ export interface PlaneLabProps {
 
 export function PlaneLab(props: PlaneLabProps) {
   const { state, design, onChange } = props;
-  const [clipSize, setClipSize] = useState<PaperclipSize>('small');
 
-  const { halfSpan, noseY } = useMemo(() => planeMetrics(state), [state]);
-  const wingW = design.wingFrac * halfSpan;
+  const { halfSpan } = useMemo(() => planeMetrics(state), [state]);
   const wingLine = wingLineOf(design, halfSpan);
   const clips = design.clips;
 
@@ -94,50 +86,27 @@ export function PlaneLab(props: PlaneLabProps) {
   const verdict = STABILITY_TEXT[stab.verdict];
   const patch = (p: Partial<Design>) => onChange({ ...design, ...p });
 
-  const addClip = () => {
-    if (clips.length >= MAX_CLIPS) return;
-    const id = (clips.reduce((mx, c) => Math.max(mx, c.id), 0) || 0) + 1;
-    const pos: Vec3 = vec3(0, noseY * 0.9, wingW * 0.5);
-    patch({ clips: [...clips, { id, pos, size: clipSize }] });
-  };
-  const removeClip = () => patch({ clips: clips.slice(0, -1) });
-  const moveClip = (id: number, pos: Vec3) =>
-    patch({ clips: clips.map((c: Paperclip) => (c.id === id ? { ...c, pos } : c)) });
-
   return (
     <div class="planelab">
-      <div class={`verdict ${stab.verdict}`}>
-        <span class="verdict-emoji">{verdict.emoji}</span>
-        <span>{verdict.text}</span>
-        <span class="verdict-note">這是示意，最後以實際射出為準</span>
-      </div>
-
-      <div class="planelab-main">
-        <div class="preview-wrap">
-          <div class="panel-label">
-            {note ?? '用滑鼠拖一拖，轉轉看飛機 ✈️　點一下會發亮的翼片，就能把它翹起來 👆'}
-          </div>
-          <Preview3D
-            pieces={shown}
-            cg={mass.cg}
-            cp={planform.cp}
-            clips={clips}
-            hovered={hovered}
-            selected={selected}
-            clickable={bendable}
-            onHover={setHoverId}
-            onPick={onPick}
-          />
+      <div class="preview-wrap">
+        <div class={`verdict-badge ${stab.verdict}`}>
+          <span class="verdict-emoji">{verdict.emoji}</span>
+          <span>{verdict.text}</span>
         </div>
-        <div class="diagram-wrap">
-          <StabilityDiagram
-            assembly={assembly}
-            cg={mass.cg}
-            cp={planform.cp}
-            clips={clips}
-            onMoveClip={moveClip}
-          />
+        <div class="panel-label">
+          {note ?? '拖一拖轉轉看 ✈️　點會發亮的翼片把它翹起 👆'}
         </div>
+        <Preview3D
+          pieces={shown}
+          cg={mass.cg}
+          cp={planform.cp}
+          clips={clips}
+          hovered={hovered}
+          selected={selected}
+          clickable={bendable}
+          onHover={setHoverId}
+          onPick={onPick}
+        />
       </div>
 
       <div class="planelab-controls">
@@ -195,29 +164,6 @@ export function PlaneLab(props: PlaneLabProps) {
             </>
           )}
         </div>
-        <div class="control clip-control">
-          <label>迴紋針（{clips.length}／{MAX_CLIPS}）</label>
-          <div class="clip-buttons">
-            <button class="chip" onClick={removeClip} disabled={clips.length === 0}>
-              ➖
-            </button>
-            <button class="chip" onClick={addClip} disabled={clips.length >= MAX_CLIPS}>
-              ➕ 📎
-            </button>
-            <button
-              class={`chip size ${clipSize === 'small' ? 'on' : ''}`}
-              onClick={() => setClipSize('small')}
-            >
-              小📎
-            </button>
-            <button
-              class={`chip size ${clipSize === 'large' ? 'on' : ''}`}
-              onClick={() => setClipSize('large')}
-            >
-              大📎
-            </button>
-          </div>
-        </div>
       </div>
 
       <div class="planelab-foot">
@@ -226,7 +172,6 @@ export function PlaneLab(props: PlaneLabProps) {
         {planform.dragIndex > 0.02 && (
           <b>　· 翼片翹起：會飛得比較慢（阻力），升力中心往前（容易仰頭）</b>
         )}
-        （在側面圖上把 📎 往機頭拖，看看重心怎麼變）
       </div>
     </div>
   );
