@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import {
   type FlightBehavior,
   type PaperState,
@@ -7,11 +7,14 @@ import {
   assemblyMass,
   behaviorFromVerdict,
   buildAssembly,
+  flightAero,
   liftCenter,
+  simulateFlight,
   stability,
 } from '../../core';
 import { type Design, bendsOf, planeMetrics, wingLineOf } from '../design';
 import { BEHAVIOR_LABEL } from '../text';
+import { FlightReplay } from './FlightReplay';
 import { type LogRecord, loadLog, saveLog } from './store';
 
 const deg2rad = (d: number) => (d * Math.PI) / 180;
@@ -28,18 +31,26 @@ export interface FlightLogProps {
 export function FlightLog(props: FlightLogProps) {
   const { state, design, ops } = props;
 
-  const prediction = useMemo(() => {
+  const { prediction, path } = useMemo(() => {
     const { halfSpan } = planeMetrics(state);
     const assembly = buildAssembly(state, wingLineOf(design, halfSpan), deg2rad(design.dihedralDeg), bendsOf(state, design));
     const mass = assemblyMass(assembly, design.clips);
     const pf = liftCenter(assembly);
     const stab = stability(mass.cg, pf.cp, pf.meanChord);
-    return { behavior: behaviorFromVerdict(stab.verdict), marginPct: stab.margin * 100, massG: mass.mass };
+    const flightPath = simulateFlight({ ...flightAero(mass, pf, stab), incidenceRad: assembly.wingIncidence });
+    return {
+      prediction: { behavior: behaviorFromVerdict(stab.verdict), marginPct: stab.margin * 100, massG: mass.mass },
+      path: flightPath,
+    };
   }, [state, design]);
 
   const [records, setRecords] = useState<LogRecord[]>(() => loadLog());
   const [distance, setDistance] = useState('');
   const [behavior, setBehavior] = useState<FlightBehavior>('glide');
+  // 記錄完這次射出後才播放模擬動畫（先猜、再射、對答案）。
+  const [replayFor, setReplayFor] = useState<LogRecord | null>(null);
+  // 改了設計就把舊的模擬對照收起來（避免動畫和比對對不上）。
+  useEffect(() => setReplayFor(null), [state, design]);
 
   const dist = Number(distance);
   const canSave = distance !== '' && Number.isFinite(dist) && dist >= 0;
@@ -58,6 +69,7 @@ export function FlightLog(props: FlightLogProps) {
     setRecords(next);
     saveLog(next);
     setDistance('');
+    setReplayFor(rec); // 存好了，才放模擬動畫對答案
   };
   const del = (id: string) => {
     const next = records.filter((r) => r.id !== id);
@@ -113,6 +125,32 @@ export function FlightLog(props: FlightLogProps) {
           </button>
         </div>
       </div>
+
+      {replayFor && (
+        <div class="replay-card">
+          <div class="replay-head">
+            <span class="replay-title">🎬 模擬：飛機大概會這樣飛</span>
+            <button class="chip" onClick={() => setReplayFor(null)}>
+              ✖ 關掉
+            </button>
+          </div>
+          <FlightReplay path={path} />
+          <div class="replay-compare">
+            <span>
+              工具猜：{BEHAVIOR_LABEL[replayFor.prediction.behavior].icon}{' '}
+              {BEHAVIOR_LABEL[replayFor.prediction.behavior].text}
+            </span>
+            <span>
+              你看到：{BEHAVIOR_LABEL[replayFor.measured.behavior].icon}{' '}
+              {BEHAVIOR_LABEL[replayFor.measured.behavior].text}
+            </span>
+            <span class="replay-verdict">
+              {replayFor.prediction.behavior === replayFor.measured.behavior ? '一樣耶 ✅' : '不一樣 🤔 再多射幾次看看'}
+            </span>
+          </div>
+          <div class="predict-note">這是示意，最後以實際射出為準（看「怎麼飛」就好，距離不用太在意）</div>
+        </div>
+      )}
 
       <div class="log-list">
         {records.length === 0 ? (
