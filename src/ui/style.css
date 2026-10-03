@@ -532,6 +532,14 @@ h1 {
   color: #b5631f;
 }
 
+.section-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
 .log-list {
   display: flex;
   flex-direction: column;

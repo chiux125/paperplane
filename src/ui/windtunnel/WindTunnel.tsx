@@ -3,9 +3,11 @@ import {
   type Assembly,
   type PaperState,
   type SideFlap,
+  type SpeedProfile,
   type TopFlapWake,
   type Vec2,
   STALL_ANGLE_DEG,
+  sideSpeedProfile,
   assemblyMass,
   buildAssembly,
   circulationMag,
@@ -38,6 +40,11 @@ const SOURCES = 13;
 const PER_SOURCE = 18;
 const deg2rad = (d: number) => (d * Math.PI) / 180;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
+/** 「📌 釘住」的截面速度分布，用模組變數存，切到別的分頁再回來也還在（方便比較改前改後）。 */
+let pinnedProfile: SpeedProfile | null = null;
+/** 截面速度長條：100% 來流畫這麼長（翼弦比例）。 */
+const PROFILE_LEN = 0.6;
 
 interface Particle {
   x: number;
@@ -147,6 +154,19 @@ export function WindTunnel(props: WindTunnelProps) {
   // 把會變動的資料放進 ref，讓單一動畫迴圈讀最新值。
   const live = useRef({ effRad: 0, geom, stalled, tw, margin: 0 });
   live.current = { effRad: deg2rad(effDeg), geom, stalled, tw, margin: stab.margin };
+
+  // 截面速度：截面線位置（標準座標 x）、最新算好的分布、以及「釘住」用的狀態。
+  const xcRef = useRef(0.55); // 預設擺在機翼後緣附近（看得到上快下慢＋尾流）
+  const lastProfile = useRef<SpeedProfile | null>(null);
+  const [pinned, setPinned] = useState<SpeedProfile | null>(pinnedProfile);
+  const pinNow = () => {
+    pinnedProfile = lastProfile.current;
+    setPinned(pinnedProfile);
+  };
+  const clearPin = () => {
+    pinnedProfile = null;
+    setPinned(null);
+  };
 
   // 側視：煙線流過機翼剖面
   useEffect(() => {
@@ -263,11 +283,51 @@ export function WindTunnel(props: WindTunnelProps) {
         const moment = -live.current.margin * ps.theta; // >0：機頭往上（攻角變大）
         drawPushArrow(ctx, noseX, noseY, moment > 0 ? -1 : 1, live.current.margin > 0);
       }
+
+      // 定點截面速度：沿一條可拖動的垂直線，量這條線上由下到上的風速（以來流為 100%）。
+      const xc = Math.max(geo.xL + 0.3, Math.min(geo.xR - PROFILE_LEN - 0.1, xcRef.current));
+      xcRef.current = xc;
+      const prof = sideSpeedProfile(alpha, flaps, xc, -geo.halfH * 0.92, geo.halfH * 0.92, 26);
+      lastProfile.current = prof;
+      drawProfile(ctx, prof, pinnedProfile, X, Y, geo.s);
+
       windLabel(ctx);
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+
+    // 拖動截面線
+    const toFx = (clientX: number) => {
+      const rect = el.getBoundingClientRect();
+      return (clientX - rect.left - geo.cx) / geo.s;
+    };
+    let dragging = false;
+    const nearLine = (clientX: number) => Math.abs(X(xcRef.current) - (clientX - el.getBoundingClientRect().left)) < 16;
+    const onDown = (e: PointerEvent) => {
+      if (!nearLine(e.clientX)) return;
+      dragging = true;
+      xcRef.current = toFx(e.clientX);
+      el.setPointerCapture?.(e.pointerId);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (dragging) xcRef.current = toFx(e.clientX);
+      el.style.cursor = dragging || nearLine(e.clientX) ? 'ew-resize' : 'default';
+    };
+    const onUp = () => {
+      dragging = false;
+    };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointerleave', onUp);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointerleave', onUp);
+    };
   }, []);
 
   // 俯視：翼尖渦流——煙線受機翼與攻角影響，翼尖後方捲成螺旋
@@ -450,6 +510,20 @@ export function WindTunnel(props: WindTunnelProps) {
           )}
           <span class="push-hint">把機頭推高一點，看它會不會自己回正</span>
         </div>
+        <div class="section-row">
+          {pinned ? (
+            <button class="chip" onClick={clearPin}>
+              ✖ 清除釘住
+            </button>
+          ) : (
+            <button class="chip" onClick={pinNow}>
+              📌 釘住現在
+            </button>
+          )}
+          <span class="push-hint">
+            拖側視圖那條直線量「截面風速」（100% = 和吹進來一樣快）；釘住後改設計或攻角，就能比前後差多少
+          </span>
+        </div>
       </div>
       <div class="tunnel-foot">
         把攻角慢慢調大看什麼時候「亂掉」（失速約 {STALL_ANGLE_DEG}°）· 🔴重心 🔵升力中心 · 到「看飛機」改機翼位置／斜度／迴紋針，這裡會跟著變
@@ -495,6 +569,117 @@ function noPenetrateSegment(p: Particle, a: Vec2, b: Vec2) {
 }
 
 type Proj = (f: number) => number;
+
+const pct = (f: number) => `${Math.round(f * 100)}%`;
+
+/** 風速比例 → 顏色：慢（<100%）偏橘、快（>100%）偏青、剛好偏白。 */
+function speedColor(frac: number, a = 1): string {
+  const light = [225, 235, 245];
+  const orange = [240, 150, 90];
+  const cyan = [110, 205, 255];
+  const mix = (to: number[], t: number) =>
+    light.map((v, i) => Math.round(v + (to[i] - v) * clamp01(t)));
+  const c = frac < 1 ? mix(orange, (1 - frac) / 0.7) : mix(cyan, (frac - 1) / 0.4);
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/** 畫定點截面的風速分布：一條直線＋由下到上的風速長條（100% 來流 = 參考虛線那麼長）。 */
+function drawProfile(
+  ctx: CanvasRenderingContext2D,
+  prof: SpeedProfile,
+  pinned: SpeedProfile | null,
+  X: Proj,
+  Y: Proj,
+  s: number,
+) {
+  const ss = prof.samples;
+  if (ss.length < 2) return;
+  const L = PROFILE_LEN * s;
+  const sx = X(prof.x);
+  const yTop = Y(ss[ss.length - 1].y);
+  const yBot = Y(ss[0].y);
+  const px = (frac: number) => sx + Math.min(1.7, frac) * L;
+
+  ctx.save();
+  // 截面線
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(sx, yTop - 6);
+  ctx.lineTo(sx, yBot + 2);
+  ctx.stroke();
+  // 100% 來流參考線
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.setLineDash([3, 4]);
+  ctx.beginPath();
+  ctx.moveTo(sx + L, yTop);
+  ctx.lineTo(sx + L, yBot);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 釘住的對照（灰色虛線）
+  if (pinned && pinned.samples.length > 1) {
+    ctx.strokeStyle = 'rgba(205,214,224,0.65)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    pinned.samples.forEach((p, i) => (i ? ctx.lineTo(px(p.frac), Y(p.y)) : ctx.moveTo(px(p.frac), Y(p.y))));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 目前分布：填色 + 曲線 + 點
+  ctx.beginPath();
+  ctx.moveTo(sx, yBot);
+  for (const p of ss) ctx.lineTo(px(p.frac), Y(p.y));
+  ctx.lineTo(sx, yTop);
+  ctx.closePath();
+  ctx.fillStyle = speedColor(prof.avgFrac, 0.13);
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.82)';
+  ctx.beginPath();
+  ss.forEach((p, i) => (i ? ctx.lineTo(px(p.frac), Y(p.y)) : ctx.moveTo(px(p.frac), Y(p.y))));
+  ctx.stroke();
+  for (const p of ss) {
+    ctx.fillStyle = speedColor(p.frac, 0.95);
+    ctx.beginPath();
+    ctx.arc(px(p.frac), Y(p.y), 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 把手
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  roundRect(ctx, sx - 12, yTop - 22, 24, 15, 4);
+  ctx.fill();
+  ctx.fillStyle = '#20303d';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('↔', sx, yTop - 14);
+
+  // 數字
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(`截面風速　最慢 ${pct(prof.minFrac)}　最快 ${pct(prof.maxFrac)}`, 10, 8);
+  if (pinned) {
+    ctx.fillStyle = 'rgba(205,214,224,0.9)';
+    ctx.fillText(`📌 釘住　最慢 ${pct(pinned.minFrac)}　最快 ${pct(pinned.maxFrac)}`, 10, 24);
+  }
+  ctx.restore();
+}
 
 /**
  * 畫真正的飛機側影：把立體飛機的側面投影（y, z）對齊到風洞裡的機翼剖面。

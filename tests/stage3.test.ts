@@ -13,6 +13,8 @@ import {
   plate,
   scale,
   separationAlong,
+  type SideFlap,
+  sideSpeedProfile,
   simpleFold,
   tipVortexAxisV,
   topFlowAt,
@@ -58,6 +60,32 @@ describe('風洞流場（標準座標）', () => {
     const bot = flowAt(a, add(mid, scale(nUp, -0.4)));
     expect(top.x).toBeGreaterThan(1);
     expect(bot.x).toBeLessThan(1);
+  });
+});
+
+describe('截面速度分布（定點風速）', () => {
+  it('均勻來流：遠處截面每一點都 ≈ 100%', () => {
+    const prof = sideSpeedProfile(0, [], 3, -1, 1, 20);
+    expect(prof.samples).toHaveLength(20);
+    expect(prof.minFrac).toBeCloseTo(1, 2);
+    expect(prof.maxFrac).toBeCloseTo(1, 2);
+    expect(prof.avgFrac).toBeGreaterThanOrEqual(prof.minFrac);
+    expect(prof.avgFrac).toBeLessThanOrEqual(prof.maxFrac);
+  });
+
+  it('有攻角：截面上方比來流快、下方比來流慢（升力的樣子）', () => {
+    const prof = sideSpeedProfile(deg(10), [], 0, -0.8, 0.8, 30);
+    expect(prof.maxFrac).toBeGreaterThan(1.02);
+    expect(prof.minFrac).toBeLessThan(0.98);
+  });
+
+  it('翼片尾流：截面落在翹起翼片後面 → 風速明顯變慢', () => {
+    const flap: SideFlap = { base: vec(0, 0), tip: vec(0.2, 0.3), lift: 0.1, drag: 0.3 };
+    const clean = sideSpeedProfile(0, [], 0.3, -0.1, 0.4, 24);
+    const wake = sideSpeedProfile(0, [flap], 0.3, -0.1, 0.4, 24);
+    expect(wake.minFrac).toBeLessThan(clean.minFrac);
+    expect(wake.minFrac).toBeLessThan(0.9);
+    expect(wake.samples.some((s) => s.wake > 0)).toBe(true);
   });
 });
 

@@ -1,5 +1,6 @@
 import { type Vec2, add, dot, scale, sub, vec } from '../geom/vec';
 import type { Assembly } from './assembly';
+import { type SideFlap, flapFlowAt } from './flapflow';
 
 /**
  * 階段 3：側面 2D 風洞的「簡化流場」（示意，不是真的流體模擬）。
@@ -105,6 +106,60 @@ export function flowAt(alpha: number, p: Vec2): Vec2 {
   let v = add(vec(1, 0), vortexInduced(gamma, quarterChord(alpha), p));
   if (inWake(alpha, p)) v = vec(WAKE_SPEED, v.y * 0.3);
   return v;
+}
+
+/** 一條垂直截面上某一點的風速（以來流為 1）。 */
+export interface SpeedSample {
+  /** 這一點的高度（標準座標，翼弦比例）。 */
+  readonly y: number;
+  /** 風速是來流的幾倍（1 = 和來流一樣快）。 */
+  readonly frac: number;
+  /** 這一點在翼片尾流裡的強度（0~1，UI 上色用）。 */
+  readonly wake: number;
+}
+
+/** 一條垂直截面（定點）的風速分布，給「截面速度」視覺化用。 */
+export interface SpeedProfile {
+  /** 截面所在的順流位置（標準座標）。 */
+  readonly x: number;
+  /** 由下到上的取樣點。 */
+  readonly samples: readonly SpeedSample[];
+  /** 這條線上最慢的風速比例（＝尾流最明顯的地方）。 */
+  readonly minFrac: number;
+  /** 這條線上最快的風速比例（＝機翼上方加速）。 */
+  readonly maxFrac: number;
+  /** 平均風速比例。 */
+  readonly avgFrac: number;
+}
+
+/**
+ * 在標準座標系（翼弦 1、來流 1）裡，沿 x = xc 的垂直截面取一排風速。
+ * 風速以「來流的倍數」表示（1 = 100%）：尾流裡會低於 1、機翼上方會高於 1。
+ * flaps 要先依攻角轉好（和畫面上的煙線用同一組），沒翹翼片就傳空陣列。
+ */
+export function sideSpeedProfile(
+  alpha: number,
+  flaps: readonly SideFlap[],
+  xc: number,
+  yLo: number,
+  yHi: number,
+  n = 28,
+): SpeedProfile {
+  const samples: SpeedSample[] = [];
+  let minFrac = Infinity;
+  let maxFrac = 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const y = n > 1 ? yLo + (yHi - yLo) * (i / (n - 1)) : (yLo + yHi) / 2;
+    const p = vec(xc, y);
+    const { v, wake } = flapFlowAt(flaps, flowAt(alpha, p), p);
+    const frac = Math.hypot(v.x, v.y);
+    samples.push({ y, frac, wake });
+    minFrac = Math.min(minFrac, frac);
+    maxFrac = Math.max(maxFrac, frac);
+    sum += frac;
+  }
+  return { x: xc, samples, minFrac, maxFrac, avgFrac: n > 0 ? sum / n : 0 };
 }
 
 /**
