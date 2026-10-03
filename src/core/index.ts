@@ -25,6 +25,7 @@ export * from './physics/flaps';
 export * from './physics/flapflow';
 export * from './physics/planform';
 export * from './physics/stability';
+export * from './physics/flight';
 export * from './physics/windtunnel';
 export * from './physics/topflow';
 export * from './validate/validate';
