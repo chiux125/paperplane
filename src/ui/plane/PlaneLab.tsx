@@ -61,7 +61,7 @@ export function PlaneLab(props: PlaneLabProps) {
     if (id === null) return setSelectedIdx(null);
     if (!bendable.has(id)) {
       setSelectedIdx(null);
-      return say('這片紙兩邊都連著，翹不起來喔，試試會發亮的那些 ✨');
+      return say('這片被扣住了，翹不起來喔 🔒　試試會發亮的那些 ✨');
     }
     const idx = flapIndexOf(state, flaps, id);
     if (idx >= 0) return setSelectedIdx(idx);

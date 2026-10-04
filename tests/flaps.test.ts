@@ -5,6 +5,7 @@ import {
   type FaceId,
   type Line,
   type PaperState,
+  type UserOp,
   type Vec2,
   area,
   bendableFaces,
@@ -12,13 +13,18 @@ import {
   centroid,
   createSheet,
   crease,
+  current,
   faceList,
+  facesOverlap,
   flapAnchor,
   flapFor,
   flapIndexOf,
   flapPartners,
   flapRoots,
+  getFace,
+  getOrder,
   pointToPoint,
+  replay,
   resolveFlapBends,
   reverseFold,
   simpleFold,
@@ -131,5 +137,73 @@ describe('翹起（3D）', () => {
   it('用原紙上的位置記錄，重新摺一次也找得到同一片', () => {
     const at = flapAnchor(s, orange);
     expect(resolveFlapBends(kidPlane(), [{ at, deg: 45 }]).size).toBe(2);
+  });
+
+  it('整片翼片翹起是剛體旋轉：任兩片之間的距離在不同角度下都一樣（不會分叉往相反方向）', () => {
+    const g = flapFor(s, orange)!;
+    const cs = (ang: number) => {
+      const asm = buildAssembly(s, wingLine, 0, new Map([[orange, deg(ang)]]));
+      return g.faces.map((fid) => asm.pieces.find((p) => p.faceId === fid && !p.mirrored)!.centroid);
+    };
+    const a = cs(30);
+    const b = cs(55);
+    for (let i = 0; i < a.length; i++)
+      for (let j = i + 1; j < a.length; j++) {
+        const da = Math.hypot(a[i].x - a[j].x, a[i].y - a[j].y, a[i].z - a[j].z);
+        const db = Math.hypot(b[i].x - b[j].x, b[i].y - b[j].y, b[i].z - b[j].z);
+        expect(db).toBeCloseTo(da, 3);
+      }
+  });
+});
+
+// 使用者截圖那架飛機：標準飛鏢（兩次對角摺到中線）＋機頭尖端往回倒摺扣住，再對摺。
+const DART_OPS: UserOp[] = [
+  { kind: 'fold', line: { p: { x: 0, y: 297 }, d: { x: -Math.SQRT1_2, y: Math.SQRT1_2 } }, pick: { x: 55.9, y: 297 }, place: 'top', mirror: true },
+  { kind: 'fold', line: { p: { x: 0, y: 297 }, d: { x: -0.3826834323650898, y: 0.9238795325112867 } }, pick: { x: 62.1, y: 234.9 }, place: 'top', mirror: true },
+  { kind: 'reverse', line: { p: { x: 105, y: 43.507575950824986 }, d: { x: 0.5555702330196024, y: -0.8314696123025451 } }, pick: { x: 39.05, y: 109.46 }, style: 'top-over' },
+  { kind: 'fold', line: { p: { x: 0, y: 0 }, d: { x: 0, y: 1 } }, pick: { x: -1, y: 148.5 }, place: 'top', mirror: true },
+];
+const dartPlane = (): PaperState => {
+  const r = replay(createSheet(), DART_OPS);
+  if (!r.ok) throw new Error(`dart replay failed: ${r.error}`);
+  return current(r.value);
+};
+
+/** f 是否被「不屬於 group 的紙」夾住（同一半的上下都有，或兩半之間）。和 assembly.groupLocked 同一套規則。 */
+function sandwiched(s: PaperState, f: FaceId, group: readonly FaceId[]): boolean {
+  const half = (id: FaceId) => Math.sign(centroid(getFace(s, id).cp).x);
+  const sf = half(f);
+  const ff = getFace(s, f);
+  let sa = false;
+  let sb = false;
+  let oa = false;
+  let ob = false;
+  for (const o of faceList(s)) {
+    if (group.includes(o.id)) continue;
+    if (!facesOverlap(ff, o)) continue;
+    const ord = getOrder(s.orders, o.id, f);
+    if (ord === 0) continue;
+    const same = half(o.id) === sf;
+    if (ord === 1) same ? (sa = true) : (oa = true);
+    else same ? (sb = true) : (ob = true);
+  }
+  return (sa && sb) || (oa && ob);
+}
+
+describe('翹起翼片不會把扣住的紙翻出來（飛鏢機頭尖端）', () => {
+  const s = dartPlane();
+
+  it('每一片「可翹的翼片」裡，都沒有被別的紙扣住／夾住的紙', () => {
+    for (const f of bendableFaces(s)) {
+      const g = flapFor(s, f)!;
+      for (const member of g.faces) {
+        expect(sandwiched(s, member, g.faces)).toBe(false);
+      }
+    }
+  });
+
+  it('這架飛機確實有被倒扣住、翹不起來的紙（flapFor 回 null）', () => {
+    const locked = faceList(s).filter((f) => sandwiched(s, f.id, [f.id]) && flapFor(s, f.id) === null);
+    expect(locked.length).toBeGreaterThan(0);
   });
 });

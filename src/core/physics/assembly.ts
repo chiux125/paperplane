@@ -4,7 +4,8 @@ import { hingeAngle } from '../engine/angle';
 import { area, centroid, splitByDistances } from '../geom/polygon';
 import { type Vec2, add as add2, scale as scale2, vec } from '../geom/vec';
 import { type Vec3, add3, normalize3, rotateAxis, sub3, vec3 } from '../geom/vec3';
-import { foldedPolygon, getFace } from '../model/face';
+import { facesOverlap, foldedPolygon, getFace } from '../model/face';
+import { getOrder } from '../model/orders';
 import type { FaceId, Hinge, PaperState } from '../model/types';
 import { PAPER_GSM } from './mass';
 
@@ -121,6 +122,37 @@ const halfOf = (state: PaperState, id: FaceId): number => {
   return Math.abs(x) < 1e-6 ? 0 : Math.sign(x);
 };
 
+/**
+ * 這群要翹的紙裡，有沒有哪一片被「不屬於這群的紙」扣住、掀不起來？
+ * 用現有的層序＋重疊判斷（不動摺紙核心）：一片若被夾在別的紙之間就掀不出來——
+ *  - **在自己這一半裡被夾住**：同一半、不屬於這群的紙，在它上面也有、下面也有（埋在自己半邊的夾層裡）。
+ *  - **塞在機身兩半之間**：另一半的紙在它上面也有、下面也有（卡進中間龍骨的口袋）。
+ * （對摺後另一半整個疊在上面是正常的，不算扣住；所以要分「同半 / 另一半」各自看上下。
+ *  用「上下都有」判斷才對左右對稱，不會因為哪一半疊在上面而兩邊結論不同。）
+ */
+function groupLocked(state: PaperState, group: ReadonlySet<FaceId>): boolean {
+  const all = [...state.faces.keys()];
+  for (const f of group) {
+    const sf = halfOf(state, f);
+    const ff = getFace(state, f);
+    let sameAbove = false;
+    let sameBelow = false;
+    let oppAbove = false;
+    let oppBelow = false;
+    for (const other of all) {
+      if (group.has(other)) continue;
+      if (!facesOverlap(ff, getFace(state, other))) continue;
+      const ord = getOrder(state.orders, other, f); // other 在 f 上面？
+      if (ord === 0) continue;
+      const same = halfOf(state, other) === sf;
+      if (ord === 1) same ? (sameAbove = true) : (oppAbove = true);
+      else same ? (sameBelow = true) : (oppBelow = true);
+    }
+    if ((sameAbove && sameBelow) || (oppAbove && oppBelow)) return true;
+  }
+  return false;
+}
+
 const flapCache = new WeakMap<PaperState, Map<FaceId, FlapGroup | null>>();
 
 /**
@@ -198,6 +230,8 @@ function bestFlap(
       (index.get(fid) ?? []).some((h) => onAxis(h) && h.hinge.faces.some((o) => !group.has(o))),
     );
     if (!attached) continue;
+    // 這群裡若有被別的紙扣住／夾住的，硬掀會穿紙 → 這條轉軸不合法，換下一條。
+    if (groupLocked(state, group)) continue;
     best = {
       root: id,
       faces: [...group].sort((a, b) => a - b),
@@ -257,6 +291,47 @@ export function buildAssembly(
     if (group) flaps.push({ group, angle });
   }
   flaps.sort((a, b) => a.group.area - b.group.area);
+
+  // 每一片要翹起的翼片，整片放進同一個基準框（機身或機翼），不被機翼摺線切成兩段。
+  // 不然跨過摺線的翼片會一段立在機身、一段展在機翼，各繞各的軸轉而裂開。
+  // 整片放哪一側：用面積加權看它主要落在機翼摺線的哪一邊。巢狀時外層（較大片）決定朝向。
+  const flapRegionOf = new Map<FaceId, Region>();
+  for (const { group } of flaps) {
+    let signed = 0;
+    for (const fid of group.faces) {
+      const poly = foldedPolygon(getFace(state, fid)).map(nx);
+      signed += area(poly) * signedDist(line, centroid(poly));
+    }
+    const region: Region = signed >= 0 === fuselageOnLeft ? 'fuselage' : 'wing';
+    for (const fid of group.faces) flapRegionOf.set(fid, region);
+  }
+
+  // 每一片翼片的轉軸與「整片往哪一邊翹」的方向：用整片的面積加權形心一次決定，
+  // 分到轉軸兩側的紙（例如倒摺回來的尖角）也一起同向轉，不會各轉各的而裂開。
+  const placeIn = (region: Region, p: Vec2): Vec3 => (region === 'wing' ? swing(embed(p)) : embed(p));
+  const flapRot = flaps.map(({ group, angle }) => {
+    const region = flapRegionOf.get(group.faces[0]) ?? 'fuselage';
+    const aPt = placeIn(region, nx(group.axis[0]));
+    const bPt = placeIn(region, nx(group.axis[1]));
+    const ax = normalize3(sub3(bPt, aPt));
+    let wx = 0;
+    let wy = 0;
+    let wz = 0;
+    let wsum = 0;
+    for (const fid of group.faces) {
+      const poly = foldedPolygon(getFace(state, fid)).map(nx);
+      const a = area(poly);
+      const cc = placeIn(region, centroid(poly));
+      wx += cc.x * a;
+      wy += cc.y * a;
+      wz += cc.z * a;
+      wsum += a;
+    }
+    const cRef = wsum > 0 ? vec3(wx / wsum, wy / wsum, wz / wsum) : aPt;
+    const ang = add3(aPt, rotateAxis(sub3(cRef, aPt), ax, angle)).z < cRef.z ? -angle : angle;
+    return { group, aPt, ax, ang };
+  });
+
   const pieces: AssemblyPiece[] = [];
   const emit = (faceId: FaceId, region: Region, frontUp: boolean, sub: readonly Vec2[]) => {
     const a = area(sub);
@@ -269,21 +344,15 @@ export function buildAssembly(
     let up = vec3(-sx, 0, 0);
     if (region === 'wing') up = rotateAxis(up, axis, theta);
 
-    // 翼片翹起：這一面所在的每一片翼片，依序繞各自的轉軸轉，讓自由端往上掀。
+    // 翼片翹起：這一面所在的每一片翼片，依序繞轉軸轉（方向整片一次決定好，見 flapRot）。
     let isBent = false;
-    for (const { group, angle } of flaps) {
-      if (!group.faces.includes(faceId)) continue;
+    for (const fr of flapRot) {
+      if (!fr.group.faces.includes(faceId)) continue;
       isBent = true;
-      const aPt = place(nx(group.axis[0]));
-      const bPt = place(nx(group.axis[1]));
-      const ax = normalize3(sub3(bPt, aPt));
-      // 選讓自由端往上(+z)的旋轉方向（同一片翼片的紙都在轉軸同一側，判斷結果一致）
-      let ang = angle;
-      if (add3(aPt, rotateAxis(sub3(c, aPt), ax, ang)).z < c.z) ang = -angle;
-      const rot = (v: Vec3) => add3(aPt, rotateAxis(sub3(v, aPt), ax, ang));
+      const rot = (v: Vec3) => add3(fr.aPt, rotateAxis(sub3(v, fr.aPt), fr.ax, fr.ang));
       poly3d = poly3d.map(rot);
       c = rot(c);
-      up = rotateAxis(up, ax, ang);
+      up = rotateAxis(up, fr.ax, fr.ang);
     }
 
     // 右半邊
@@ -301,20 +370,6 @@ export function buildAssembly(
       up: vec3(-up.x, up.y, up.z),
     });
   };
-
-  // 每一片要翹起的翼片，整片放進同一個基準框（機身或機翼），不被機翼摺線切成兩段。
-  // 不然跨過摺線的翼片會一段立在機身、一段展在機翼，各繞各的軸轉而裂開。
-  // 整片放哪一側：用面積加權看它主要落在機翼摺線的哪一邊。巢狀時外層（較大片）決定朝向。
-  const flapRegionOf = new Map<FaceId, Region>();
-  for (const { group } of flaps) {
-    let signed = 0;
-    for (const fid of group.faces) {
-      const poly = foldedPolygon(getFace(state, fid)).map(nx);
-      signed += area(poly) * signedDist(line, centroid(poly));
-    }
-    const region: Region = signed >= 0 === fuselageOnLeft ? 'fuselage' : 'wing';
-    for (const fid of group.faces) flapRegionOf.set(fid, region);
-  }
 
   for (const f of state.faces.values()) {
     const frontUp = det(f.xf) > 0;
