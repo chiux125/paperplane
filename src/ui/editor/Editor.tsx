@@ -28,7 +28,7 @@ import {
   snapSources,
 } from '../../core';
 import { type Folding, render } from './render';
-import { fitView, toWorld } from './view';
+import { type View, fitView, toScreen, toWorld } from './view';
 
 export type Tool = 'line' | 'point' | 'edge';
 
@@ -85,6 +85,8 @@ export function Editor(props: EditorProps) {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [hover, setHover] = useState<Vec2 | null>(null);
+  // 使用者自己放大縮小／平移（疊在自動對齊的基準視圖上）。null = 完全自動對齊。
+  const [zoomView, setZoomView] = useState<{ zoom: number; panX: number; panY: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = canvas.current!;
@@ -103,10 +105,61 @@ export function Editor(props: EditorProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const view = useMemo(() => fitView(state, size.w || 1, size.h || 1), [state, size]);
+  const base = useMemo(() => fitView(state, size.w || 1, size.h || 1), [state, size]);
+  // 把使用者的放大倍率與平移套在基準視圖上（以畫布中心為縮放基準）。
+  const view: View = useMemo(() => {
+    if (!zoomView) return base;
+    const cx = (size.w || 1) / 2;
+    const cy = (size.h || 1) / 2;
+    return {
+      k: base.k * zoomView.zoom,
+      ox: cx + (base.ox - cx) * zoomView.zoom + zoomView.panX,
+      oy: cy + (base.oy - cy) * zoomView.zoom + zoomView.panY,
+    };
+  }, [base, zoomView, size]);
   const sources = useMemo(() => snapSources(state), [state]);
   const cg = useMemo(() => paperMass(state).cg, [state]);
   const busy = pending !== null || animation !== null || props.locked === true;
+
+  // 以畫面上的 (mx, my) 為中心放大／縮小：讓那個點底下的紙保持在原位。
+  const ZOOM_MIN = 0.6;
+  const ZOOM_MAX = 8;
+  const zoomAt = (factor: number, mx: number, my: number) => {
+    const cw = size.w || 1;
+    const ch = size.h || 1;
+    const cx = cw / 2;
+    const cy = ch / 2;
+    const cur = zoomView ?? { zoom: 1, panX: 0, panY: 0 };
+    const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, cur.zoom * factor));
+    if (z === cur.zoom) return;
+    const v0: View = {
+      k: base.k * cur.zoom,
+      ox: cx + (base.ox - cx) * cur.zoom + cur.panX,
+      oy: cy + (base.oy - cy) * cur.zoom + cur.panY,
+    };
+    const wp = toWorld(v0, mx, my);
+    const noPan: View = { k: base.k * z, ox: cx + (base.ox - cx) * z, oy: cy + (base.oy - cy) * z };
+    const s = toScreen(noPan, wp);
+    setZoomView({ zoom: z, panX: mx - s.x, panY: my - s.y });
+  };
+  // 給滾輪事件讀最新的 zoomAt（避免每次都重掛監聽器）。
+  const zoomAtRef = useRef(zoomAt);
+  zoomAtRef.current = zoomAt;
+
+  // 滾輪縮放（以游標為中心）。用原生監聽器才擋得掉頁面捲動。
+  useEffect(() => {
+    const el = canvas.current!;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      zoomAtRef.current(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // 視窗大小變了就回到自動對齊（存的平移是 px，會跟著失準）。
+  useEffect(() => setZoomView(null), [size.w, size.h]);
 
   const snap = hover && !busy && tool !== 'edge' && phase.kind !== 'side' ? snapPoint(sources, hover, SNAP_PX / view.k) : null;
   const hoverEdge = hover && !busy && tool === 'edge' ? nearestSegment(sources.segments, hover, EDGE_PX / view.k) : null;
@@ -218,15 +271,31 @@ export function Editor(props: EditorProps) {
     setPhase({ kind: 'side', a, b, left: side(1), right: side(-1) });
   };
 
+  const cx = (size.w || 1) / 2;
+  const cy = (size.h || 1) / 2;
+
   return (
-    <canvas
-      ref={canvas}
-      class="editor"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerLeave={() => setHover(null)}
-    />
+    <div class="editor-wrap">
+      <canvas
+        ref={canvas}
+        class="editor"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={() => setHover(null)}
+      />
+      <div class="editor-zoom">
+        <button type="button" title="放大" onClick={() => zoomAt(1.3, cx, cy)}>
+          🔍➕
+        </button>
+        <button type="button" title="縮小" onClick={() => zoomAt(1 / 1.3, cx, cy)}>
+          🔍➖
+        </button>
+        <button type="button" title="全部看到" onClick={() => setZoomView(null)}>
+          ⤢
+        </button>
+      </div>
+    </div>
   );
 }
 
