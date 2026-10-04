@@ -74,20 +74,28 @@ interface Geom {
 
 function buildGeom(assembly: Assembly, cg: { y: number; z: number }, cp: { y: number; z: number }): Geom {
   let yLE = -Infinity;
+  // 前後中心與翼弦只看「沒翹起」的機翼，翹翼片時才不會讓整架飛機跟著亂動。
   let cx = 0;
-  let cz = 0;
   let n = 0;
+  let wyMin = Infinity;
+  let wyMax = -Infinity;
   for (const p of assembly.pieces) {
     if (p.region !== 'wing') continue;
+    for (const v of p.poly) yLE = Math.max(yLE, v.y);
+    if (p.bent) continue;
     for (const v of p.poly) {
-      yLE = Math.max(yLE, v.y);
       cx += v.y;
-      cz += v.z;
       n++;
+      wyMin = Math.min(wyMin, v.y);
+      wyMax = Math.max(wyMax, v.y);
     }
   }
-  const chord = wingChord(assembly) || 100;
-  const center = n > 0 ? vec(cx / n, cz / n) : vec(0, 0);
+  const chord = wyMax > wyMin ? wyMax - wyMin : wingChord(assembly) || 100;
+  // 垂直基準＝機翼摺線的高度：上反角是繞這條線轉、翼片也是繞各自的鉸鏈轉，所以這條線的高度不會變。
+  // 以它為準，調上反角／翹翼片時「機身底線」不動，只有機翼／翼片在動，方便前後對比。
+  // （上反角 0 時它剛好等於機翼形心高度，所以平常的樣子和以前一致。）
+  const baseZ = assembly.wingLine.p.x;
+  const center = n > 0 ? vec(cx / n, baseZ) : vec(0, baseZ);
 
   // 側面投影：直接取立體飛機每一面的 (y, z)
   const sideWings: Vec2[][] = [];
