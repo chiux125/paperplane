@@ -119,41 +119,6 @@ h1 {
   flex: 1.7;
 }
 
-/* 穩定度判語縮小，疊在 3D 圖右上角 */
-.verdict-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: bold;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
-}
-
-.verdict-badge .verdict-emoji {
-  font-size: 20px;
-}
-
-.verdict-badge.stable {
-  background: #e4f6ec;
-  color: #1f7a4d;
-}
-
-.verdict-badge.pitch-up {
-  background: #fdeecf;
-  color: #a35a00;
-}
-
-.verdict-badge.nose-dive {
-  background: #fde4e4;
-  color: #b23636;
-}
-
 @media (max-width: 900px) {
   .lab {
     flex-direction: column;

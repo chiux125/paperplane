@@ -14,7 +14,6 @@ import {
   stability,
 } from '../../core';
 import { type Design, bendsOf, flapKey, planeMetrics, wingLineOf } from '../design';
-import { STABILITY_TEXT } from '../text';
 import { Preview3D } from './Preview3D';
 
 const deg2rad = (d: number) => (d * Math.PI) / 180;
@@ -83,16 +82,11 @@ export function PlaneLab(props: PlaneLabProps) {
   const planform = useMemo(() => liftCenter(assembly), [assembly]);
   const stab = useMemo(() => stability(mass.cg, planform.cp, planform.meanChord), [mass, planform]);
 
-  const verdict = STABILITY_TEXT[stab.verdict];
   const patch = (p: Partial<Design>) => onChange({ ...design, ...p });
 
   return (
     <div class="planelab">
       <div class="preview-wrap">
-        <div class={`verdict-badge ${stab.verdict}`}>
-          <span class="verdict-emoji">{verdict.emoji}</span>
-          <span>{verdict.text}</span>
-        </div>
         <div class="panel-label">
           {note ?? '拖一拖轉轉看 ✈️　點會發亮的翼片把它翹起 👆'}
         </div>
