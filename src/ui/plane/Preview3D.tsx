@@ -292,7 +292,33 @@ export function Preview3D(props: Preview3DProps) {
     if (r && scene.current && camera.current) r.render(scene.current, camera.current);
   }, [props.hovered, props.selected, props.clickable]);
 
-  return <div class="preview3d" ref={mount} />;
+  // 放大鏡：讓相機沿視線靠近／遠離目標（夾在 OrbitControls 的遠近範圍內）。
+  const zoom = (factor: number) => {
+    const cam = camera.current;
+    const ctl = controls.current;
+    const r = renderer.current;
+    const s = scene.current;
+    if (!cam || !ctl || !r || !s) return;
+    const dir = cam.position.clone().sub(ctl.target);
+    const dist = Math.max(ctl.minDistance, Math.min(ctl.maxDistance, dir.length() * factor));
+    cam.position.copy(ctl.target).add(dir.normalize().multiplyScalar(dist));
+    ctl.update();
+    r.render(s, cam);
+  };
+
+  return (
+    <div class="preview3d">
+      <div class="preview3d-canvas" ref={mount} />
+      <div class="preview3d-zoom">
+        <button type="button" title="放大" onClick={() => zoom(1 / 1.3)}>
+          🔍➕
+        </button>
+        <button type="button" title="縮小" onClick={() => zoom(1.3)}>
+          🔍➖
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function applyGlow(
