@@ -152,7 +152,7 @@ export function PlaneLab(props: PlaneLabProps) {
               <input
                 type="range"
                 min={0}
-                max={80}
+                max={180}
                 value={flaps[sel].deg}
                 onInput={(e) => setFlapDeg(Number((e.target as HTMLInputElement).value))}
               />
