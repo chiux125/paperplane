@@ -770,6 +770,14 @@ h1 {
   touch-action: none;
 }
 
+.editor.pan {
+  cursor: grab;
+}
+
+.editor.pan:active {
+  cursor: grabbing;
+}
+
 .editor-zoom {
   position: absolute;
   right: 10px;
@@ -792,6 +800,11 @@ h1 {
 
 .editor-zoom button:active {
   background: #e5f1fc;
+}
+
+.editor-zoom button.on {
+  background: #cfe3fb;
+  box-shadow: 0 0 0 2px #4a90d9 inset;
 }
 
 .hintbar {

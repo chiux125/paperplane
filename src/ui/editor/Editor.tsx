@@ -87,6 +87,9 @@ export function Editor(props: EditorProps) {
   const [hover, setHover] = useState<Vec2 | null>(null);
   // 使用者自己放大縮小／平移（疊在自動對齊的基準視圖上）。null = 完全自動對齊。
   const [zoomView, setZoomView] = useState<{ zoom: number; panX: number; panY: number } | null>(null);
+  // 「手掌」移動紙張模式；拖曳時記住起點。
+  const [panMode, setPanMode] = useState(false);
+  const panStart = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = canvas.current!;
@@ -96,6 +99,8 @@ export function Editor(props: EditorProps) {
   }, []);
 
   useEffect(() => setPhase({ kind: 'idle' }), [state, tool, props.resetKey]);
+  // 選了摺紙工具就退出「移動紙張」模式。
+  useEffect(() => setPanMode(false), [tool]);
   useEffect(() => props.onPhase(phase.kind), [phase.kind]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -223,6 +228,13 @@ export function Editor(props: EditorProps) {
   };
 
   const onPointerDown = (e: PointerEvent) => {
+    if (panMode) {
+      if (e.button !== 0) return;
+      canvas.current!.setPointerCapture(e.pointerId);
+      const cur = zoomView ?? { zoom: 1, panX: 0, panY: 0 };
+      panStart.current = { x: e.clientX, y: e.clientY, panX: cur.panX, panY: cur.panY };
+      return;
+    }
     if (busy || e.button !== 0) return;
     const w = world(e);
     if (tool === 'line') {
@@ -251,6 +263,14 @@ export function Editor(props: EditorProps) {
   };
 
   const onPointerMove = (e: PointerEvent) => {
+    if (panMode) {
+      if (panStart.current) {
+        const ps = panStart.current;
+        const cur = zoomView ?? { zoom: 1, panX: 0, panY: 0 };
+        setZoomView({ zoom: cur.zoom, panX: ps.panX + (e.clientX - ps.x), panY: ps.panY + (e.clientY - ps.y) });
+      }
+      return;
+    }
     const w = world(e);
     setHover(w);
     // 按住 Shift：依孩子拉的方向，把線校正成完美水平或垂直
@@ -258,6 +278,10 @@ export function Editor(props: EditorProps) {
   };
 
   const onPointerUp = () => {
+    if (panStart.current) {
+      panStart.current = null;
+      return;
+    }
     if (phase.kind !== 'drawing') return;
     const { a, b } = phase;
     if (dist(a, b) * view.k < 8) {
@@ -278,7 +302,7 @@ export function Editor(props: EditorProps) {
     <div class="editor-wrap">
       <canvas
         ref={canvas}
-        class="editor"
+        class={`editor ${panMode ? 'pan' : ''}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -290,6 +314,17 @@ export function Editor(props: EditorProps) {
         </button>
         <button type="button" title="縮小" onClick={() => zoomAt(1 / 1.3, cx, cy)}>
           🔍➖
+        </button>
+        <button
+          type="button"
+          class={panMode ? 'on' : ''}
+          title="移動紙張：點一下，再拖曳把紙移到想看的位置"
+          onClick={() => {
+            setPanMode((v) => !v);
+            setHover(null);
+          }}
+        >
+          ✋
         </button>
         <button type="button" title="全部看到" onClick={() => setZoomView(null)}>
           ⤢
