@@ -228,9 +228,10 @@ export function Editor(props: EditorProps) {
   };
 
   const onPointerDown = (e: PointerEvent) => {
-    if (panMode) {
-      if (e.button !== 0) return;
+    // 右鍵拖曳，或「手掌」模式左鍵拖曳：移動紙張（畫線途中也能順手移動）。
+    if (e.button === 2 || (panMode && e.button === 0)) {
       canvas.current!.setPointerCapture(e.pointerId);
+      canvas.current!.style.cursor = 'grabbing';
       const cur = zoomView ?? { zoom: 1, panX: 0, panY: 0 };
       panStart.current = { x: e.clientX, y: e.clientY, panX: cur.panX, panY: cur.panY };
       return;
@@ -263,14 +264,13 @@ export function Editor(props: EditorProps) {
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    if (panMode) {
-      if (panStart.current) {
-        const ps = panStart.current;
-        const cur = zoomView ?? { zoom: 1, panX: 0, panY: 0 };
-        setZoomView({ zoom: cur.zoom, panX: ps.panX + (e.clientX - ps.x), panY: ps.panY + (e.clientY - ps.y) });
-      }
+    if (panStart.current) {
+      const ps = panStart.current;
+      const cur = zoomView ?? { zoom: 1, panX: 0, panY: 0 };
+      setZoomView({ zoom: cur.zoom, panX: ps.panX + (e.clientX - ps.x), panY: ps.panY + (e.clientY - ps.y) });
       return;
     }
+    if (panMode) return; // 手掌模式但還沒按下：不預覽
     const w = world(e);
     setHover(w);
     // 按住 Shift：依孩子拉的方向，把線校正成完美水平或垂直
@@ -280,6 +280,7 @@ export function Editor(props: EditorProps) {
   const onPointerUp = () => {
     if (panStart.current) {
       panStart.current = null;
+      if (canvas.current) canvas.current.style.cursor = '';
       return;
     }
     if (phase.kind !== 'drawing') return;
@@ -307,6 +308,7 @@ export function Editor(props: EditorProps) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => setHover(null)}
+        onContextMenu={(e) => e.preventDefault()}
       />
       <div class="editor-zoom">
         <button type="button" title="放大" onClick={() => zoomAt(1.3, cx, cy)}>

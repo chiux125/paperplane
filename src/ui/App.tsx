@@ -371,7 +371,7 @@ export function App() {
             ) : (
               <>
                 <span class="hint">{hint}</span>
-                {pending && (
+                {pending ? (
                   <>
                     <button class="yes" onClick={confirm}>
                       ✅ 摺！
@@ -388,6 +388,12 @@ export function App() {
                       ✖ 不要
                     </button>
                   </>
+                ) : (
+                  phase !== 'idle' && (
+                    <button class="no" title="取消這一摺，重新來" onClick={cancel}>
+                      ✖ 取消
+                    </button>
+                  )
                 )}
               </>
             )}
