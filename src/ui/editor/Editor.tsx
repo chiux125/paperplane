@@ -273,7 +273,7 @@ export function Editor(props: EditorProps) {
     if (panMode) return; // 手掌模式但還沒按下：不預覽
     const w = world(e);
     setHover(w);
-    // 按住 Shift：依孩子拉的方向，把線校正成完美水平或垂直
+    // 按住 Shift：依孩子拉的方向，把線校正成水平／垂直／45°
     if (phase.kind === 'drawing') setPhase({ ...phase, b: e.shiftKey ? axisAlign(phase.a, w) : snapped(w) });
   };
 
@@ -336,9 +336,16 @@ export function Editor(props: EditorProps) {
   );
 }
 
-/** 把 b 校正成相對 a 完美水平或垂直（看拉的方向比較偏哪一個）。 */
+/** 把 b 校正到相對 a 最接近的 45° 方向（水平、垂直、或斜 45°），並投影到那條線上。 */
 function axisAlign(a: Vec2, w: Vec2): Vec2 {
-  return Math.abs(w.x - a.x) >= Math.abs(w.y - a.y) ? { x: w.x, y: a.y } : { x: a.x, y: w.y };
+  const dx = w.x - a.x;
+  const dy = w.y - a.y;
+  const step = Math.PI / 4;
+  const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+  const ux = Math.cos(ang);
+  const uy = Math.sin(ang);
+  const t = dx * ux + dy * uy; // 游標投影到該方向的長度
+  return { x: a.x + t * ux, y: a.y + t * uy };
 }
 
 function sideOf(phase: { a: Vec2; b: Vec2 }, w: Vec2): number {

@@ -36,8 +36,8 @@ export const TOOL_LABEL: Record<Tool, { icon: string; text: string }> = {
 
 export const HINT: Record<Tool, Partial<Record<PhaseKind, string>>> = {
   line: {
-    idle: '按住滑鼠畫一條摺線（按住 Shift 會變直的）',
-    drawing: '放開滑鼠就畫好；按住 Shift 會變成水平或垂直',
+    idle: '按住滑鼠畫一條摺線（按住 Shift 會對齊水平／垂直／45°）',
+    drawing: '放開滑鼠就畫好；按住 Shift 會對齊水平／垂直／45°',
     side: '點一下要翻過去的那一邊',
   },
   point: {
