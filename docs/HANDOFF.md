@@ -14,12 +14,12 @@
 - 摺紙核心（`src/core/model`、`engine`、`planners`、`validate`）的資料結構不要改；`PaperState` 永遠是理想的攤平狀態。3D、翼片翹起、風洞都是從它「推導」出來的。
 - 核心邏輯放 `src/core/`，純函式、不碰 DOM、要寫測試；UI 放 `src/ui/`。
 - 不要使用 GPL 程式碼（Rabbit Ear、OriSim3D 都是 GPL-3.0，只能參考概念）。
-- 不要 `git push`、不要改寫歷史。使用者有時會在你做到一半時自己 commit（例如 `450a895 顯示`），就在它上面接著 commit。commit 訊息用英文，結尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。
+- 不要 `git push`、不要改寫歷史。使用者有時會在你做到一半時自己 commit（例如 `cb7ca3e 顯示`），就在它上面接著 commit。commit 訊息用英文，結尾加 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。
 - 完成一個功能要更新 `docs/ROADMAP.md`。
 
 ## 今天做了什麼
 
-### 1. 「看飛機」3D 預覽：不透明、只看得到最外層（`aaa1bc8`）
+### 1. 「看飛機」3D 預覽：不透明、只看得到最外層（`c0fccd5`）
 
 - 問題：疊在一起的紙在同一平面（厚度 0）互相穿透（z-fighting），底層的摺痕也露出來；而且 `Assembly` 為了重量對稱把整疊紙鏡射到左右兩邊，同一位置有兩份紙。
 - 做法（只改顯示，重心／升力計算不動）：
@@ -27,9 +27,9 @@
   - `physics/assembly.ts` 的 `AssemblyPiece` 多了 `mirrored` 和 `up`（摺紙畫面「朝上」那側的 3D 法向量）。
   - `physics/display.ts` 的 `displayPieces()`：對摺時在下面的半張紙放右邊、上面的半張放左邊（左翼用鏡射那份、`up` 反向），每片依局部層數沿法線錯開 `PAPER_THICKNESS` = 0.15 mm。
   - `ui/plane/Preview3D.tsx`：正反兩面各一個材質（白正面／橘背面）；只畫層與層的交界（同平面、同朝向、並排在兩側的邊視為攤平摺痕，不畫）；邊線沿法線 ±0.3 倍紙厚各畫一次。
-- 之前另一個工作階段試過「全域層序 × 2.5 mm」的爆炸圖（`3236a47`），使用者覺得怪，已還原（`b0b8516`）。不要再做那種大間距分層。
+- 之前另一個工作階段試過「全域層序 × 2.5 mm」的爆炸圖（`a55688a`），使用者覺得怪，已還原（`16f3efa`）。不要再做那種大間距分層。
 
-### 2. 點選翼片翹起（`450a895`、`701dcf0`、`614699c`）
+### 2. 點選翼片翹起（`cb7ca3e`、`7284d30`、`4bcbf82`）
 
 - 在 3D 裡點一片紙（raycast，第一個打到的就是最外層）→ 選中並翹起 30°；滑桿「選到的翼片翹起 X°」0～80°；「↩️ 放下」移除；點空白處取消；點到翹不起來的紙會提示。
 - 顏色：可以翹的紙平常淡淡綠色、滑鼠指著變深綠、已選取藍色（直接換材質顏色；用自發光在白紙上看不出來）。
@@ -51,7 +51,7 @@
   - `resolveFlapBends()`、`flapIndexOf()`。
 - `ui/design.ts`：`Design.flaps?: FlapBend[]`（新）。`flapBendDeg` 是舊欄位，只為了讓舊存檔／實測紀錄還能打開（它只翹「單一面」的翼片）；新操作會把它設為 0。`flapKey(design)` 給 `useMemo` 當相依值。
 
-### 3. 風洞的煙會受翹起的翼片影響（`fbde752`）
+### 3. 風洞的煙會受翹起的翼片影響（`e55bb27`）
 
 - 問題：煙的流場 `flowAt`（側視）、`topFlowAt`（俯視）只認得平板機翼，翹起翼片後煙完全不變。
 - `physics/flapflow.ts`（純函式＋測試）：
